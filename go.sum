@@ -650,6 +650,8 @@ github.com/jtolds/gls v4.20.0+incompatible h1:xdiiI2gbIgH/gLH7ADydsJ1uDOEzR8yvV7
 github.com/jtolds/gls v4.20.0+incompatible/go.mod h1:QJZ7F/aHp+rZTRtaJ1ow/lLfFfVYBRgL+9YlvaHOwJU=
 github.com/julianedwards/cedar v0.0.0-20211208170129-886d1ea40108 h1:rQGJjVCXZ1kvqyQyDmQDCDZSHr7uc7jQ5rP8q9MxOYw=
 github.com/julianedwards/cedar v0.0.0-20211208170129-886d1ea40108/go.mod h1:x6KPlbwZlcWuRz8tsVNyx+LeOJ5dPmJUXxZEpVSeZdg=
+github.com/julianedwards/cedar v0.0.0-20211208203612-cf2e23fb090e h1:NFpLUabY+NIrVmYmsY2CRjpTLjN2gF6Mv/tXdZ0Owxc=
+github.com/julianedwards/cedar v0.0.0-20211208203612-cf2e23fb090e/go.mod h1:x6KPlbwZlcWuRz8tsVNyx+LeOJ5dPmJUXxZEpVSeZdg=
 github.com/julienschmidt/httprouter v1.2.0/go.mod h1:SYymIcj16QtmaHHD7aYtjjsJG7VTCxuUUipMqKk8s4w=
 github.com/jung-kurt/gofpdf v1.0.0/go.mod h1:7Id9E/uU8ce6rXgefFLlgrJj/GYY22cpxn+r32jIOes=
 github.com/jung-kurt/gofpdf v1.0.3-0.20190309125859-24315acbbda5/go.mod h1:7Id9E/uU8ce6rXgefFLlgrJj/GYY22cpxn+r32jIOes=
