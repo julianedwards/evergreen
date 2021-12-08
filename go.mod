@@ -16,7 +16,7 @@ require (
 	github.com/evergreen-ci/gimlet v0.0.0-20211119154230-7c9e13926e12
 	github.com/evergreen-ci/go-test2json v0.0.0-20180702150328-5b6cfd2e8cb0
 	github.com/evergreen-ci/juniper v0.0.0-20210624185208-0fd21a88954c
-	github.com/evergreen-ci/pail v0.0.0-20211028170419-8efd623fd305
+	github.com/evergreen-ci/pail v0.0.0-20211119154247-0c51f12ed31b
 	github.com/evergreen-ci/poplar v0.0.0-20211028171636-d45516ea1ce5
 	github.com/evergreen-ci/shrub v0.0.0-20211025143051-a8d91b2e29fd
 	github.com/evergreen-ci/timber v0.0.0-20211130153959-0bffc8bc5ad2
@@ -64,6 +64,7 @@ require (
 	github.com/evergreen-ci/aviation v0.0.0-20211123195311-5ddfd75b3753 // indirect
 	github.com/evergreen-ci/evg-lint v0.0.0-20211115144425-3b19c8e83a57
 	github.com/evergreen-ci/tarjan v0.0.0-20170824211642-fcd3f3321826
+	github.com/julianedwards/cedar v0.0.0-20211208170129-886d1ea40108 // indirect
 	github.com/mongodb/jasper v0.0.0-20211118154831-ee0b5744e192
 	golang.org/x/net v0.0.0-20211123203042-d83791d6bcd9 // indirect
 	golang.org/x/sys v0.0.0-20211124211545-fe61309f8881 // indirect
