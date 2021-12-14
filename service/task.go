@@ -545,7 +545,32 @@ func (uis *UIServer) taskLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// check buildlogger logs first
+	// check bucket logs first
+	bucketReader, err := apimodels.GetBucketLogs(ctx, apimodels.GetBucketLogsOptions{
+		Key:     projCtx.Task.BucketId(utility.ToIntPtr(execution)),
+		Reverse: true,
+	})
+	if err == nil {
+		defer func() {
+			grip.Warning(message.WrapError(bucketReader.Close(), message.Fields{
+				"task_id": projCtx.Task.Id,
+				"message": "failed to close bucket log ReadCloser",
+			}))
+		}()
+		gimlet.WriteJSON(w, apimodels.ReadBucketLogsToSlice(ctx, apimodels.ReadBucketLogsOptions{
+			TaskId:     projCtx.Task.Id,
+			ReadCloser: bucketReader,
+			Filter:     apimodels.FilterByLogType(logType),
+			Limit:      DefaultLogMessages,
+		}))
+		return
+	}
+	grip.Warning(message.WrapError(err, message.Fields{
+		"task_id": projCtx.Task.Id,
+		"message": "problem getting bucket logs",
+	}))
+
+	// check buildlogger logs second
 	opts := apimodels.GetBuildloggerLogsOptions{
 		BaseURL:       uis.Settings.Cedar.BaseURL,
 		TaskID:        projCtx.Task.Id,
@@ -604,6 +629,34 @@ func (uis *UIServer) taskLogRaw(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var logReader io.ReadCloser
+	data := logData{
+		Buildlogger: make(chan apimodels.LogMessage, 1024),
+		User:        usr,
+	}
+	// check bucket logs first
+	bucketReader, err := apimodels.GetBucketLogs(ctx, apimodels.GetBucketLogsOptions{
+		Key: projCtx.Task.BucketId(utility.ToIntPtr(execution)),
+	})
+	if err == nil {
+		defer func() {
+			grip.Warning(message.WrapError(bucketReader.Close(), message.Fields{
+				"task_id": projCtx.Task.Id,
+				"message": "failed to close bucket log ReadCloser",
+			}))
+		}()
+		data.Data = make(chan apimodels.LogMessage, 1024)
+		go apimodels.ReadBucketLogsToChan(ctx, apimodels.ReadBucketLogsOptions{
+			TaskId:     projCtx.Task.Id,
+			ReadCloser: bucketReader,
+			Filter:     apimodels.FilterByLogType(logType),
+			Lines:      data.Data,
+		})
+		return
+	}
+	grip.Warning(message.WrapError(err, message.Fields{
+		"task_id": projCtx.Task.Id,
+		"message": "problem getting bucket logs",
+	}))
 
 	// check buildlogger logs first
 	opts := apimodels.GetBuildloggerLogsOptions{
@@ -628,8 +681,7 @@ func (uis *UIServer) taskLogRaw(w http.ResponseWriter, r *http.Request) {
 		}))
 	}
 
-	data := logData{Buildlogger: make(chan apimodels.LogMessage, 1024), User: usr}
-	if logReader == nil {
+	if logReader == nil && bucketReader == nil {
 		logTypeFilter := []string{}
 		if logType != AllLogsType {
 			logTypeFilter = []string{logType}

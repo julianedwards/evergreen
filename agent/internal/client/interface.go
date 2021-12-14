@@ -134,6 +134,7 @@ type TaskData struct {
 	ID                 string
 	Secret             string
 	OverrideValidation bool
+	bucketSenderBase   *bucketSenderBase
 }
 
 type LoggerConfig struct {

@@ -21,8 +21,9 @@ import (
 	"github.com/evergreen-ci/evergreen/model/task"
 	restmodel "github.com/evergreen-ci/evergreen/rest/model"
 	"github.com/evergreen-ci/evergreen/util"
-	"github.com/evergreen-ci/timber/buildlogger"
 	"github.com/evergreen-ci/utility"
+	"github.com/julianedwards/cedar/encode"
+	"github.com/julianedwards/cedar/options"
 	"github.com/mongodb/grip"
 	"github.com/mongodb/grip/level"
 	"github.com/mongodb/grip/logging"
@@ -400,17 +401,17 @@ func (c *hostCommunicator) GetLoggerProducer(ctx context.Context, td TaskData, c
 	}
 	underlying := []send.Sender{}
 
-	exec, senders, err := c.makeSender(ctx, td, config.Agent, apimodels.AgentLogPrefix, evergreen.LogTypeAgent)
+	exec, senders, err := c.makeSender(ctx, &td, config.Agent, apimodels.AgentLogPrefix, evergreen.LogTypeAgent)
 	if err != nil {
 		return nil, errors.Wrap(err, "making agent logger")
 	}
 	underlying = append(underlying, senders...)
-	task, senders, err := c.makeSender(ctx, td, config.Task, apimodels.TaskLogPrefix, evergreen.LogTypeTask)
+	task, senders, err := c.makeSender(ctx, &td, config.Task, apimodels.TaskLogPrefix, evergreen.LogTypeTask)
 	if err != nil {
 		return nil, errors.Wrap(err, "making task logger")
 	}
 	underlying = append(underlying, senders...)
-	system, senders, err := c.makeSender(ctx, td, config.System, apimodels.SystemLogPrefix, evergreen.LogTypeSystem)
+	system, senders, err := c.makeSender(ctx, &td, config.System, apimodels.SystemLogPrefix, evergreen.LogTypeSystem)
 	if err != nil {
 		return nil, errors.Wrap(err, "making system logger")
 	}
@@ -424,7 +425,7 @@ func (c *hostCommunicator) GetLoggerProducer(ctx context.Context, td TaskData, c
 	}, nil
 }
 
-func (c *hostCommunicator) makeSender(ctx context.Context, td TaskData, opts []LogOpts, prefix string, logType string) (send.Sender, []send.Sender, error) {
+func (c *hostCommunicator) makeSender(ctx context.Context, td *TaskData, opts []LogOpts, prefix string, logType string) (send.Sender, []send.Sender, error) {
 	levelInfo := send.LevelInfo{Default: level.Info, Threshold: level.Debug}
 	senders := []send.Sender{grip.GetSender()}
 	underlyingBufferedSenders := []send.Sender{}
@@ -490,36 +491,44 @@ func (c *hostCommunicator) makeSender(ctx context.Context, td TaskData, opts []L
 			case apimodels.TaskLogPrefix:
 				c.loggerInfo.Task = append(c.loggerInfo.Task, metadata)
 			}
+			/*
+				case model.BuildloggerLogSender:
+					tk, err := c.GetTask(ctx, td)
+					if err != nil {
+						return nil, nil, errors.Wrap(err, "setting up buildlogger sender")
+					}
+
+					if err = c.createCedarGRPCConn(ctx, c); err != nil {
+						return nil, nil, errors.Wrap(err, "setting up cedar grpc connection")
+					}
+
+					timberOpts := &buildlogger.LoggerOptions{
+						Project:       tk.Project,
+						Version:       tk.Version,
+						Variant:       tk.BuildVariant,
+						TaskName:      tk.DisplayName,
+						TaskID:        tk.Id,
+						Execution:     int32(tk.Execution),
+						Tags:          append(tk.Tags, logType, utility.RandomString()),
+						Mainline:      !evergreen.IsPatchRequester(tk.Requester),
+						Storage:       buildlogger.LogStorageS3,
+						MaxBufferSize: opt.BufferSize,
+						FlushInterval: opt.BufferDuration,
+						ClientConn:    c.cedarGRPCClient,
+					}
+					sender, err = buildlogger.NewLoggerWithContext(ctx, opt.BuilderID, levelInfo, timberOpts)
+					if err != nil {
+						return nil, nil, errors.Wrap(err, "creating buildlogger logger")
+					}
+			*/
 		case model.BuildloggerLogSender:
-			tk, err := c.GetTask(ctx, td)
-			if err != nil {
-				return nil, nil, errors.Wrap(err, "setting up buildlogger sender")
+			if err := c.newTaskBucketLogger(ctx, td, levelInfo); err != nil {
+				return nil, nil, err
 			}
 
-			if err = c.createCedarGRPCConn(ctx, c); err != nil {
-				return nil, nil, errors.Wrap(err, "setting up cedar grpc connection")
-			}
-
-			timberOpts := &buildlogger.LoggerOptions{
-				Project:       tk.Project,
-				Version:       tk.Version,
-				Variant:       tk.BuildVariant,
-				TaskName:      tk.DisplayName,
-				TaskID:        tk.Id,
-				Execution:     int32(tk.Execution),
-				Tags:          append(tk.Tags, logType, utility.RandomString()),
-				Mainline:      !evergreen.IsPatchRequester(tk.Requester),
-				Storage:       buildlogger.LogStorageS3,
-				MaxBufferSize: opt.BufferSize,
-				FlushInterval: opt.BufferDuration,
-				ClientConn:    c.cedarGRPCClient,
-			}
-			sender, err = buildlogger.NewLoggerWithContext(ctx, opt.BuilderID, levelInfo, timberOpts)
-			if err != nil {
-				return nil, nil, errors.Wrap(err, "creating buildlogger logger")
-			}
+			sender = newBucketSender(td.bucketSenderBase, logType)
 		default:
-			sender = newEvergreenLogSender(ctx, c, prefix, td, bufferSize, bufferDuration)
+			sender = newEvergreenLogSender(ctx, c, prefix, *td, bufferSize, bufferDuration)
 		}
 
 		grip.Error(sender.SetFormatter(send.MakeDefaultFormatter()))
@@ -530,6 +539,46 @@ func (c *hostCommunicator) makeSender(ctx context.Context, td TaskData, opts []L
 	}
 
 	return send.NewConfiguredMultiSender(senders...), underlyingBufferedSenders, nil
+}
+
+func (c *hostCommunicator) newTaskBucketLogger(ctx context.Context, td *TaskData, levelInfo send.LevelInfo) error {
+	if td.bucketSenderBase != nil {
+		return nil
+	}
+
+	tk, err := c.GetTask(ctx, *td)
+	if err != nil {
+		return errors.Wrap(err, "getting task data")
+	}
+	apiTask := &restmodel.APITask{}
+	if err := apiTask.BuildFromService(tk); err != nil {
+		return errors.Wrap(err, "getting log metadata")
+	}
+
+	cedarConf, err := c.GetCedarConfig(ctx)
+	if err != nil {
+		return errors.Wrap(err, "getting setup data")
+	}
+
+	bucketLogger, err := cedarConf.CreateBucketLogger(ctx)
+	if err != nil {
+		return err
+	}
+
+	err = bucketLogger.AddMetadata(ctx, options.AddMetadata{
+		Key:      "task",
+		Data:     apiTask,
+		Encoding: encode.JSON,
+	})
+	if err != nil {
+		return errors.Wrap(err, "adding task metadata to bucket logger")
+	}
+
+	td.bucketSenderBase, err = newBucketSenderBase(ctx, bucketLogger, bucketSenderOptions{
+		key:       tk.BucketId(nil),
+		levelInfo: levelInfo,
+	})
+	return errors.Wrap(err, "creating bucket sender base")
 }
 
 // SendLogMessages posts a group of log messages for a task.

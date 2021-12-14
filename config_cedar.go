@@ -8,10 +8,13 @@ import (
 )
 
 type CedarConfig struct {
-	BaseURL string `bson:"base_url" json:"base_url" yaml:"base_url"`
-	RPCPort string `bson:"rpc_port" json:"rpc_port" yaml:"rpc_port"`
-	User    string `bson:"user" json:"user" yaml:"user"`
-	APIKey  string `bson:"api_key" json:"api_key" yaml:"api_key"`
+	BaseURL    string `bson:"base_url" json:"base_url" yaml:"base_url"`
+	RPCPort    string `bson:"rpc_port" json:"rpc_port" yaml:"rpc_port"`
+	User       string `bson:"user" json:"user" yaml:"user"`
+	APIKey     string `bson:"api_key" json:"api_key" yaml:"api_key"`
+	AWSKey     string `bson:"aws_key,omitempty" json:"aws_key,omitempty" yaml:"aws_key,omitempty"`
+	AWSSecret  string `bson:"aws_secret,omitempty" json:"aws_secret,omitempty" yaml:"aws_secret,omitempty"`
+	LogsBucket string `bson:"logs_bucket,omitempty" json:"logs_bucket,omitempty" yaml:"logs_bucket,omitempty"`
 }
 
 func (*CedarConfig) SectionId() string { return "cedar" }

@@ -3,6 +3,7 @@ package apimodels
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strconv"
@@ -13,6 +14,8 @@ import (
 	"github.com/evergreen-ci/gimlet"
 	"github.com/evergreen-ci/timber"
 	"github.com/evergreen-ci/timber/buildlogger"
+	"github.com/julianedwards/cedar/logger"
+	"github.com/julianedwards/cedar/options"
 	"github.com/mongodb/grip"
 	"github.com/mongodb/grip/level"
 	"github.com/mongodb/grip/message"
@@ -188,6 +191,147 @@ func ReadBuildloggerToSlice(ctx context.Context, taskID string, r io.ReadCloser)
 	lines := []LogMessage{}
 	lineChan := make(chan LogMessage, 1024)
 	go ReadBuildloggerToChan(ctx, taskID, r, lineChan)
+
+	for {
+		line, more := <-lineChan
+		if !more {
+			break
+		}
+
+		lines = append(lines, line)
+	}
+
+	return lines
+}
+
+type LogMessageFilter func(LogMessage) bool
+
+func FilterByLogType(logType string) LogMessageFilter {
+	switch logType {
+	case TaskLogPrefix:
+		logType = evergreen.LogTypeTask
+	case SystemLogPrefix:
+		logType = evergreen.LogTypeSystem
+	case AgentLogPrefix:
+		logType = evergreen.LogTypeAgent
+	case AllTaskLevelLogs, "":
+		return func(_ LogMessage) bool {
+			return true
+		}
+	}
+
+	return func(log LogMessage) bool {
+		if log.Type == logType {
+			return true
+		}
+
+		return false
+	}
+}
+
+type GetBucketLogsOptions struct {
+	Key     string `json:"-"`
+	Reverse bool   `json:"-"`
+}
+
+func GetBucketLogs(ctx context.Context, opts GetBucketLogsOptions) (logger.ReadCloser, error) {
+	dbConf := evergreen.GetEnvironment().Settings().Cedar
+	apiConf := CedarConfig{
+		AWSKey:     dbConf.AWSKey,
+		AWSSecret:  dbConf.AWSSecret,
+		LogsBucket: dbConf.LogsBucket,
+	}
+	bucketLogger, err := apiConf.CreateBucketLogger(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var r logger.ReadCloser
+	readerOpts := options.Read{Key: opts.Key}
+	if opts.Reverse {
+		r, err = bucketLogger.NewReverseReadCloser(ctx, readerOpts)
+	} else {
+		r, err = bucketLogger.NewReadCloser(ctx, readerOpts)
+	}
+
+	return r, errors.Wrap(err, "getting bucket logger read closer")
+}
+
+type ReadBucketLogsOptions struct {
+	TaskId     string
+	ReadCloser logger.ReadCloser
+	Filter     LogMessageFilter
+	Limit      int
+	Lines      chan LogMessage
+}
+
+func ReadBucketLogsToChan(ctx context.Context, opts ReadBucketLogsOptions) {
+	defer func() {
+		if err := recovery.HandlePanicWithError(recover(), nil, "read bucket logs to chan"); err != nil {
+			grip.Error(message.WrapError(err, message.Fields{
+				"task_id": opts.TaskId,
+				"message": "reading bucket log lines to chan",
+			}))
+		}
+	}()
+
+	defer close(opts.Lines)
+	if opts.ReadCloser == nil {
+		return
+	}
+
+	var (
+		lineCount int
+		err       error
+	)
+	for err == nil {
+		data, err := opts.ReadCloser.ReadPage()
+		if err != nil && err != io.EOF {
+			grip.Warning(message.WrapError(err, message.Fields{
+				"task_id": opts.TaskId,
+				"message": "reading bucket log lines",
+			}))
+			return
+		}
+
+		page := []LogMessage{}
+		if err := json.Unmarshal(data, page); err != nil {
+			grip.Warning(message.WrapError(err, message.Fields{
+				"task_id": opts.TaskId,
+				"message": "unmarshaling bucket log lines",
+			}))
+			return
+		}
+
+		for _, line := range page {
+			if opts.Limit > 0 && lineCount > opts.Limit {
+				return
+			}
+			if opts.Filter != nil && !opts.Filter(line) {
+				continue
+			}
+
+			lineCount++
+
+			select {
+			case <-ctx.Done():
+				grip.Error(message.WrapError(ctx.Err(), message.Fields{
+					"task_id": opts.TaskId,
+					"message": "context error while reading buildlogger log lines",
+				}))
+			case opts.Lines <- line:
+			}
+		}
+	}
+}
+
+func ReadBucketLogsToSlice(ctx context.Context, opts ReadBucketLogsOptions) []LogMessage {
+	lines := []LogMessage{}
+	lineChan := opts.Lines
+	if lineChan == nil {
+		lineChan = make(chan LogMessage, 1024)
+	}
+	go ReadBucketLogsToChan(ctx, opts)
 
 	for {
 		line, more := <-lineChan

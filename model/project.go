@@ -620,11 +620,12 @@ func mergeAllLogs(main, add *LoggerConfig) *LoggerConfig {
 }
 
 const (
-	EvergreenLogSender   = "evergreen"
-	FileLogSender        = "file"
-	LogkeeperLogSender   = "logkeeper"
-	BuildloggerLogSender = "buildlogger"
-	SplunkLogSender      = "splunk"
+	EvergreenLogSender    = "evergreen"
+	FileLogSender         = "file"
+	LogkeeperLogSender    = "logkeeper"
+	BuildloggerLogSender  = "buildlogger"
+	BucketLoggerLogSender = "bucketlogger"
+	SplunkLogSender       = "splunk"
 )
 
 // IsValidDefaultLogger returns whether the given logger, set either globally

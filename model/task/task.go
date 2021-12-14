@@ -1813,6 +1813,20 @@ func (t *Task) SetResults(results []TestResult) error {
 	return errors.Wrap(testresult.InsertMany(docs), "error inserting into testresults collection")
 }
 
+func (t *Task) BucketId(execution *int) string {
+	taskId := t.Id
+	if t.OldTaskId != "" {
+		taskId = t.OldTaskId
+	}
+
+	exec := t.Execution
+	if execution != nil {
+		exec = utility.FromIntPtr(execution)
+	}
+
+	return fmt.Sprintf("%s/%d", taskId, exec)
+}
+
 func (t TestResult) convertToNewStyleTestResult(task *Task) testresult.TestResult {
 	ExecutionDisplayName := ""
 	if displayTask, _ := task.GetDisplayTask(); displayTask != nil {
