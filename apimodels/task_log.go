@@ -230,6 +230,7 @@ func FilterByLogType(logType string) LogMessageFilter {
 }
 
 type GetBucketLogsOptions struct {
+	Prefix  string `json:"-"`
 	Key     string `json:"-"`
 	Reverse bool   `json:"-"`
 }
@@ -241,7 +242,7 @@ func GetBucketLogs(ctx context.Context, opts GetBucketLogsOptions) (logger.ReadC
 		AWSSecret:  dbConf.AWSSecret,
 		LogsBucket: dbConf.LogsBucket,
 	}
-	bucketLogger, err := apiConf.CreateBucketLogger(ctx)
+	bucketLogger, err := apiConf.CreateBucketLogger(ctx, opts.Prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +296,7 @@ func ReadBucketLogsToChan(ctx context.Context, opts ReadBucketLogsOptions) {
 		}
 
 		page := []LogMessage{}
-		if err := json.Unmarshal(data, page); err != nil {
+		if err := json.Unmarshal(data, &page); err != nil {
 			grip.Warning(message.WrapError(err, message.Fields{
 				"task_id": opts.TaskId,
 				"message": "unmarshaling bucket log lines",
@@ -327,14 +328,13 @@ func ReadBucketLogsToChan(ctx context.Context, opts ReadBucketLogsOptions) {
 
 func ReadBucketLogsToSlice(ctx context.Context, opts ReadBucketLogsOptions) []LogMessage {
 	lines := []LogMessage{}
-	lineChan := opts.Lines
-	if lineChan == nil {
-		lineChan = make(chan LogMessage, 1024)
+	if opts.Lines == nil {
+		opts.Lines = make(chan LogMessage, 1024)
 	}
 	go ReadBucketLogsToChan(ctx, opts)
 
 	for {
-		line, more := <-lineChan
+		line, more := <-opts.Lines
 		if !more {
 			break
 		}

@@ -546,7 +546,8 @@ func (uis *UIServer) taskLog(w http.ResponseWriter, r *http.Request) {
 
 	// check bucket logs first
 	bucketReader, err := apimodels.GetBucketLogs(ctx, apimodels.GetBucketLogsOptions{
-		Key:     projCtx.Task.BucketId(utility.ToIntPtr(execution)),
+		Prefix:  projCtx.Task.BucketId(utility.ToIntPtr(execution)),
+		Key:     "task",
 		Reverse: true,
 	})
 	if err == nil {
@@ -634,7 +635,8 @@ func (uis *UIServer) taskLogRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	// check bucket logs first
 	bucketReader, err := apimodels.GetBucketLogs(ctx, apimodels.GetBucketLogsOptions{
-		Key: projCtx.Task.BucketId(utility.ToIntPtr(execution)),
+		Prefix: projCtx.Task.BucketId(utility.ToIntPtr(execution)),
+		Key:    "task",
 	})
 	if err == nil {
 		defer func() {
@@ -650,12 +652,12 @@ func (uis *UIServer) taskLogRaw(w http.ResponseWriter, r *http.Request) {
 			Filter:     apimodels.FilterByLogType(logType),
 			Lines:      data.Data,
 		})
-		return
+	} else {
+		grip.Warning(message.WrapError(err, message.Fields{
+			"task_id": projCtx.Task.Id,
+			"message": "problem getting bucket logs",
+		}))
 	}
-	grip.Warning(message.WrapError(err, message.Fields{
-		"task_id": projCtx.Task.Id,
-		"message": "problem getting bucket logs",
-	}))
 
 	// check buildlogger logs first
 	opts := apimodels.GetBuildloggerLogsOptions{

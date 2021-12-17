@@ -64,7 +64,7 @@ require (
 	github.com/evergreen-ci/aviation v0.0.0-20211123195311-5ddfd75b3753 // indirect
 	github.com/evergreen-ci/evg-lint v0.0.0-20211115144425-3b19c8e83a57
 	github.com/evergreen-ci/tarjan v0.0.0-20170824211642-fcd3f3321826
-	github.com/julianedwards/cedar v0.0.0-20211210231635-16464d828e08
+	github.com/julianedwards/cedar v0.0.0-20211215181528-d9bce32270a1
 	github.com/mongodb/jasper v0.0.0-20211213143437-1d373fd6f2c6
 	golang.org/x/net v0.0.0-20211123203042-d83791d6bcd9 // indirect
 	golang.org/x/sys v0.0.0-20211124211545-fe61309f8881 // indirect

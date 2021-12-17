@@ -647,8 +647,10 @@ github.com/jstemmer/go-junit-report v0.0.0-20190106144839-af01ea7f8024/go.mod h1
 github.com/jstemmer/go-junit-report v0.9.1/go.mod h1:Brl9GWCQeLvo8nXZwPNNblvFj/XSXhF0NWZEnDohbsk=
 github.com/jtolds/gls v4.20.0+incompatible h1:xdiiI2gbIgH/gLH7ADydsJ1uDOEzR8yvV7C0MuV77Wo=
 github.com/jtolds/gls v4.20.0+incompatible/go.mod h1:QJZ7F/aHp+rZTRtaJ1ow/lLfFfVYBRgL+9YlvaHOwJU=
-github.com/julianedwards/cedar v0.0.0-20211210231635-16464d828e08 h1:JNa7fJ6OuZEH/pwTLxU8EeQrurr5DtdV86WcMzNLFo0=
-github.com/julianedwards/cedar v0.0.0-20211210231635-16464d828e08/go.mod h1:CiNWaKOBL4SD1gcKCr2hBe5fHmKbFz6n2n0M/ytyfSo=
+github.com/julianedwards/cedar v0.0.0-20211214213153-0cc473b2cb02 h1:g86wC+BXCBKZDXBo+aSE6+bMByGh5FwKVtvPVaQMCb4=
+github.com/julianedwards/cedar v0.0.0-20211214213153-0cc473b2cb02/go.mod h1:CiNWaKOBL4SD1gcKCr2hBe5fHmKbFz6n2n0M/ytyfSo=
+github.com/julianedwards/cedar v0.0.0-20211215181528-d9bce32270a1 h1:nZvKV9QP/TB+SWGVhhIGh7fmX9jAOhFpRUoi28fAQ8M=
+github.com/julianedwards/cedar v0.0.0-20211215181528-d9bce32270a1/go.mod h1:CiNWaKOBL4SD1gcKCr2hBe5fHmKbFz6n2n0M/ytyfSo=
 github.com/julienschmidt/httprouter v1.2.0/go.mod h1:SYymIcj16QtmaHHD7aYtjjsJG7VTCxuUUipMqKk8s4w=
 github.com/jung-kurt/gofpdf v1.0.0/go.mod h1:7Id9E/uU8ce6rXgefFLlgrJj/GYY22cpxn+r32jIOes=
 github.com/jung-kurt/gofpdf v1.0.3-0.20190309125859-24315acbbda5/go.mod h1:7Id9E/uU8ce6rXgefFLlgrJj/GYY22cpxn+r32jIOes=

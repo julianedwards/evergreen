@@ -550,24 +550,21 @@ func (c *hostCommunicator) newTaskBucketLogger(ctx context.Context, td *TaskData
 	if err != nil {
 		return errors.Wrap(err, "getting task data")
 	}
-	apiTask := &restmodel.APITask{}
-	if err := apiTask.BuildFromService(tk); err != nil {
-		return errors.Wrap(err, "getting log metadata")
-	}
+	metadata := tk.BucketMetadata()
 
 	cedarConf, err := c.GetCedarConfig(ctx)
 	if err != nil {
 		return errors.Wrap(err, "getting setup data")
 	}
 
-	bucketLogger, err := cedarConf.CreateBucketLogger(ctx)
+	bucketLogger, err := cedarConf.CreateBucketLogger(ctx, tk.BucketId(nil))
 	if err != nil {
 		return err
 	}
 
 	err = bucketLogger.AddMetadata(ctx, options.AddMetadata{
-		Key:      "task",
-		Data:     apiTask,
+		Key:      "task_info",
+		Data:     metadata,
 		Encoding: encode.JSON,
 	})
 	if err != nil {
@@ -575,7 +572,7 @@ func (c *hostCommunicator) newTaskBucketLogger(ctx context.Context, td *TaskData
 	}
 
 	td.bucketSenderBase, err = newBucketSenderBase(ctx, bucketLogger, bucketSenderOptions{
-		key:       tk.BucketId(nil),
+		key:       "task",
 		levelInfo: levelInfo,
 	})
 	return errors.Wrap(err, "creating bucket sender base")

@@ -114,7 +114,6 @@ func (s *bucketSenderBase) send(logType string, m message.Composer) {
 	if s.bufferSize >= s.opts.maxBufferSize {
 		if err := s.flush(s.ctx); err != nil {
 			s.local.Send(message.NewErrorMessage(level.Error, err))
-			return
 		}
 	}
 }

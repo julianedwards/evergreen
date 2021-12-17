@@ -1827,6 +1827,26 @@ func (t *Task) BucketId(execution *int) string {
 	return fmt.Sprintf("%s/%d", taskId, exec)
 }
 
+func (t *Task) BucketMetadata() apimodels.CedarTaskMetadata {
+	taskId := t.Id
+	if t.OldTaskId != "" {
+		taskId = t.OldTaskId
+	}
+
+	return apimodels.CedarTaskMetadata{
+		Project:   t.Project,
+		Version:   t.Version,
+		Variant:   t.BuildVariant,
+		TaskName:  t.DisplayName,
+		TaskId:    taskId,
+		Execution: t.Execution,
+		Mainline:  !evergreen.IsPatchRequester(t.Requester),
+		Tags:      t.Tags,
+		Status:    t.Status,
+		Schema:    0,
+	}
+}
+
 func (t TestResult) convertToNewStyleTestResult(task *Task) testresult.TestResult {
 	ExecutionDisplayName := ""
 	if displayTask, _ := task.GetDisplayTask(); displayTask != nil {

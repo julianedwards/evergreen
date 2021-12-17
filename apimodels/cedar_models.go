@@ -19,14 +19,11 @@ type CedarConfig struct {
 	// TODO: add ability to select bucket type.
 }
 
-type CedarTestResultsTaskInfo struct {
-	Failed bool `json:"failed"`
-}
-
-func (c CedarConfig) CreateBucketLogger(ctx context.Context) (logger.Logger, error) {
+func (c CedarConfig) CreateBucketLogger(ctx context.Context, prefix string) (logger.Logger, error) {
 	bl, err := logger.NewBucketLogger(ctx, options.Bucket{
-		Type: options.PailS3,
-		Name: c.LogsBucket,
+		Type:   options.PailS3,
+		Name:   c.LogsBucket,
+		Prefix: prefix,
 		S3: &options.S3Bucket{
 			Key:    c.AWSKey,
 			Secret: c.AWSSecret,
@@ -34,4 +31,21 @@ func (c CedarConfig) CreateBucketLogger(ctx context.Context) (logger.Logger, err
 	})
 
 	return bl, errors.Wrap(err, "creating bucket logger")
+}
+
+type CedarTestResultsTaskInfo struct {
+	Failed bool `json:"failed"`
+}
+
+type CedarTaskMetadata struct {
+	Project   string   `json:"project"`
+	Version   string   `json:"version"`
+	Variant   string   `json:"variant"`
+	TaskName  string   `json:"task_name"`
+	TaskId    string   `json:"task_id"`
+	Execution int      `json:"execution"`
+	Mainline  bool     `json:"mainline"`
+	Tags      []string `json:"tags"`
+	Status    string   `json:"status"`
+	Schema    int      `json:"schema"`
 }

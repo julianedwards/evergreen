@@ -9,9 +9,12 @@ import (
 
 func (as *APIServer) Cedar(w http.ResponseWriter, r *http.Request) {
 	gimlet.WriteJSON(w, &apimodels.CedarConfig{
-		BaseURL:  as.Settings.Cedar.BaseURL,
-		RPCPort:  as.Settings.Cedar.RPCPort,
-		Username: as.Settings.Cedar.User,
-		APIKey:   as.Settings.Cedar.APIKey,
+		BaseURL:    as.Settings.Cedar.BaseURL,
+		RPCPort:    as.Settings.Cedar.RPCPort,
+		Username:   as.Settings.Cedar.User,
+		APIKey:     as.Settings.Cedar.APIKey,
+		AWSKey:     as.Settings.Cedar.AWSKey,
+		AWSSecret:  as.Settings.Cedar.AWSSecret,
+		LogsBucket: as.Settings.Cedar.LogsBucket,
 	})
 }
