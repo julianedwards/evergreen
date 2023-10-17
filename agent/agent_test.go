@@ -19,6 +19,7 @@ import (
 	"github.com/evergreen-ci/evergreen/model"
 	"github.com/evergreen-ci/evergreen/model/patch"
 	"github.com/evergreen-ci/evergreen/model/task"
+	"github.com/evergreen-ci/evergreen/taskoutput"
 	"github.com/evergreen-ci/evergreen/util"
 	"github.com/evergreen-ci/utility"
 	"github.com/mongodb/grip"
@@ -2303,18 +2304,18 @@ func checkMockLogs(t *testing.T, mc *client.Mock, taskID string, logsToFind []st
 	}
 
 	var allLogs []string
-	for _, msg := range mc.GetMockMessages()[taskID] {
+	for _, line := range mc.GetTaskLogs(taskID, taskoutput.TaskLogTypeAll) {
 		for log := range expectedLog {
-			if strings.Contains(msg.Message, log) {
+			if strings.Contains(line.Data, log) {
 				expectedLog[log] = true
 			}
 		}
 		for log := range unexpectedLog {
-			if strings.Contains(msg.Message, log) {
+			if strings.Contains(line.Data, log) {
 				unexpectedLog[log] = true
 			}
 		}
-		allLogs = append(allLogs, msg.Message)
+		allLogs = append(allLogs, line.Data)
 	}
 	var displayLogs bool
 	for log, found := range expectedLog {

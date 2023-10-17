@@ -27,6 +27,10 @@ func newBucket(ctx context.Context, env evergreen.Environment, bucketName, bucke
 			return nil, errors.WithStack(err)
 		}
 	case evergreen.BucketTypeGridFS:
+		if env == nil {
+			return nil, errors.New("cannot create GridFS bucket without environment")
+		}
+
 		b, err = pail.NewGridFSBucketWithClient(ctx, env.Client(), pail.GridFSOptions{
 			Name:     bucketName,
 			Database: env.DB().Name(),

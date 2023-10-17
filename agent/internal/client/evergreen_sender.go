@@ -2,191 +2,231 @@ package client
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/evergreen-ci/evergreen"
-	"github.com/evergreen-ci/evergreen/apimodels"
+	"github.com/evergreen-ci/evergreen/model/log"
 	"github.com/mongodb/grip"
 	"github.com/mongodb/grip/level"
 	"github.com/mongodb/grip/message"
 	"github.com/mongodb/grip/send"
+	"github.com/pkg/errors"
 )
 
-type evergreenLogSender struct {
-	logTaskData         TaskData
-	logChannel          string
-	comm                SharedCommunicator
-	cancel              context.CancelFunc
-	pipe                chan message.Composer
-	signalFlush         chan struct{}
-	signalFlushComplete chan struct{}
-	lastBatch           chan struct{}
-	signalEnd           chan struct{}
-	bufferTime          time.Duration
-	bufferSize          int
-	closed              bool
-	sync.RWMutex
+const defaultMaxBufferSize = 1e7
+
+// lineParser functions parse a raw log line into the service representation of
+// a log line for uniform ingestion of logs by the Evergreen log sender.
+// Parsers need not set the log name or, in most cases, the priority.
+type lineParser func(string) (log.LogLine, error)
+
+type appender func(context.Context, []log.LogLine) error
+
+// senderOptions support the use and creation of an Evergreen log sender.
+type senderOptions struct {
+	appendLines appender
+	// parse is the function for parsing raw log lines collected by the
+	// sender.
+	// The injectable line parser allows the sender to be agnostic to the
+	// raw log line formats it ingests.
+	// Defaults to a basic line parser that adds the raw string as the log
+	// line data field.
+	parse lineParser
+	// local is the sender for "fallback" operations and to collect any
+	// logger error output.
+	local send.Sender
+	// maxBufferSize is the maximum number of bytes to buffer before
+	// persisting log data. Defaults to 10MB.
+	maxBufferSize int
+	// flushInterval is time interval at which to flush log lines,
+	// regardless of whether the max buffer size has been reached. A flush
+	// interval equal to 0 will disable timed flushes.
+	flushInterval time.Duration
+}
+
+func (opts *senderOptions) validate() error {
+	catcher := grip.NewBasicCatcher()
+	catcher.NewWhen(opts.appendLines == nil, "must provide an appender function")
+	catcher.NewWhen(opts.maxBufferSize < 0, "max buffer size cannot be negative")
+	catcher.NewWhen(opts.flushInterval < 0, "flush interval cannot be negative")
+
+	if opts.parse == nil {
+		opts.parse = func(rawLine string) (log.LogLine, error) {
+			return log.LogLine{Data: rawLine}, nil
+		}
+	}
+
+	if opts.local == nil {
+		opts.local = send.MakeNative()
+		opts.local.SetName("local")
+	}
+
+	if opts.maxBufferSize == 0 {
+		opts.maxBufferSize = defaultMaxBufferSize
+	}
+
+	return catcher.Resolve()
+}
+
+// sender implements the send.Sender interface for persisting Evergreen logs.
+type sender struct {
+	mu         sync.Mutex
+	ctx        context.Context
+	cancel     context.CancelFunc
+	opts       senderOptions
+	buffer     []log.LogLine
+	bufferSize int
+	lastFlush  time.Time
+	closed     bool
 	*send.Base
 }
 
-func newEvergreenLogSender(ctx context.Context, comm SharedCommunicator, channel string, taskData TaskData, bufferSize int, bufferTime time.Duration) send.Sender {
-	s := &evergreenLogSender{
-		comm:                comm,
-		logChannel:          channel,
-		logTaskData:         taskData,
-		Base:                send.NewBase(taskData.ID),
-		bufferSize:          bufferSize,
-		pipe:                make(chan message.Composer, bufferSize/2),
-		signalFlush:         make(chan struct{}),
-		signalFlushComplete: make(chan struct{}),
-		lastBatch:           make(chan struct{}),
-		signalEnd:           make(chan struct{}),
+// newEvergreenLogSender creates a new sender for Evergreen logs.
+func newEvergreenLogSender(ctx context.Context, name string, opts senderOptions) (send.Sender, error) {
+	if err := opts.validate(); err != nil {
+		return nil, err
 	}
-	ctx, s.cancel = context.WithCancel(ctx)
 
-	go s.startBackgroundSender(ctx)
-
-	return s
-}
-
-func (s *evergreenLogSender) getBufferTime() time.Duration {
-	s.RLock()
-	defer s.RUnlock()
-	return s.bufferTime
-}
-
-func (s *evergreenLogSender) setBufferTime(d time.Duration) {
-	s.Lock()
-	defer s.Unlock()
-	s.bufferTime = d
-}
-
-func (s *evergreenLogSender) Close() error {
-	s.Lock()
-	close(s.signalEnd)
-	s.closed = true
-	s.Unlock()
-
-	<-s.lastBatch
-	return s.Base.Close()
-}
-
-func (s *evergreenLogSender) flush(ctx context.Context, buffer []apimodels.LogMessage) {
-	grip.Critical(s.comm.SendLogMessages(ctx, s.logTaskData, buffer))
-}
-
-func (s *evergreenLogSender) startBackgroundSender(ctx context.Context) {
-	bufferTime := s.getBufferTime()
-	if bufferTime == 0 {
-		bufferTime = defaultLogBufferTime
-	}
-	timer := time.NewTimer(bufferTime)
-	buffer := []apimodels.LogMessage{}
 	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	defer timer.Stop()
-
-backgroundSender:
-	for {
-		select {
-		case <-ctx.Done():
-			s.Lock()
-			s.closed = true
-			s.Unlock()
-			break backgroundSender
-		case <-timer.C:
-			if len(buffer) > 0 {
-				s.flush(ctx, buffer)
-				buffer = []apimodels.LogMessage{}
-			}
-			timer.Reset(bufferTime)
-		case <-s.signalFlush:
-			if len(buffer) > 0 {
-				s.flush(ctx, buffer)
-				buffer = []apimodels.LogMessage{}
-			}
-			timer.Reset(bufferTime)
-			s.signalFlushComplete <- struct{}{}
-		case m := <-s.pipe:
-			buffer = append(buffer, s.convertMessage(m))
-			if len(buffer) >= s.bufferSize/2 {
-				s.flush(ctx, buffer)
-				buffer = []apimodels.LogMessage{}
-				timer.Reset(bufferTime)
-			}
-		case <-s.signalEnd:
-			break backgroundSender
-		}
+	s := &sender{
+		ctx:    ctx,
+		cancel: cancel,
+		opts:   opts,
+		Base:   send.NewBase(name),
 	}
 
-	// set the level really high, (which is mutexed) so that we
-	// never send another message
-	_ = s.SetLevel(send.LevelInfo{Threshold: level.Priority(200)})
-
-	// drain the pipe
-	close(s.pipe)
-	for msg := range s.pipe {
-		buffer = append(buffer, s.convertMessage(msg))
-		if len(buffer) >= s.bufferSize/2 {
-			s.flush(ctx, buffer)
-			buffer = []apimodels.LogMessage{}
-		}
+	if err := s.SetErrorHandler(send.ErrorHandlerFromSender(s.opts.local)); err != nil {
+		return nil, errors.Wrap(err, "setting default error handler")
 	}
 
-	// send the final batch
-	s.flush(ctx, buffer)
+	if opts.flushInterval > 0 {
+		go s.timedFlush()
+	}
 
-	// let close return
-	close(s.lastBatch)
+	return s, nil
 }
 
-func (s *evergreenLogSender) Send(m message.Composer) {
-	s.RLock()
-	defer s.RUnlock()
-	if s.closed {
+// Send sends the given message to the Evergreen log service. This function
+// buffers the messages until the maximum allowed buffer size is reached, at
+// which point the messages in the buffer are written to persistent storage by
+// the backing log service. Send is thread safe.
+func (s *sender) Send(m message.Composer) {
+	ts := time.Now().UnixNano()
+
+	if !s.Level().ShouldLog(m) {
 		return
 	}
-	if s.Level().ShouldLog(m) {
-		s.pipe <- m
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		s.opts.local.Send(message.NewErrorMessage(level.Error, errors.New("cannot call Send on a closed sender")))
+		return
+	}
+
+	for _, line := range strings.Split(m.String(), "\n") {
+		if line == "" {
+			continue
+		}
+
+		logLine, err := s.opts.parse(line)
+		if err != nil {
+			s.opts.local.Send(message.NewErrorMessage(level.Error, errors.Wrap(err, "parsing log line")))
+			return
+		}
+		if logLine.Priority == 0 {
+			logLine.Priority = m.Priority()
+		}
+		if !logLine.Priority.IsValid() {
+			s.opts.local.Send(message.NewErrorMessage(level.Error, errors.Errorf("invalid log line priority %d", logLine.Priority)))
+			return
+		}
+		if logLine.Timestamp == 0 {
+			logLine.Timestamp = ts
+		}
+		if logLine.Timestamp < 0 {
+			s.opts.local.Send(message.NewErrorMessage(level.Error, errors.Errorf("invalid log line timestamp %d", logLine.Timestamp)))
+			return
+		}
+
+		s.buffer = append(s.buffer, logLine)
+		s.bufferSize += len(line)
+		if s.bufferSize > s.opts.maxBufferSize {
+			if err := s.flush(s.ctx); err != nil {
+				s.opts.local.Send(message.NewErrorMessage(level.Error, err))
+				return
+			}
+		}
 	}
 }
 
-func (s *evergreenLogSender) Flush(_ context.Context) error {
-	s.RLock()
-	defer s.RUnlock()
+// Flush flushes anything messages that may be in the buffer to persistent
+// storage determined by the backing log service.
+func (s *sender) Flush(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if s.closed {
 		return nil
 	}
 
-	s.signalFlush <- struct{}{}
-	<-s.signalFlushComplete
+	return s.flush(ctx)
+}
+
+// Close flushes anything that may be left in the underlying buffer and
+// terminates all background operations of the sender. Close is thread safe but
+// should only be called once no more calls to Send are needed; after Close has
+// been called any subsequent calls to Send will error while subsequent calls
+// to Close will no-op.
+func (s *sender) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	defer s.cancel()
+
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+
+	if len(s.buffer) > 0 {
+		if err := s.flush(s.ctx); err != nil {
+			return errors.Wrap(err, "flushing buffer")
+		}
+	}
 
 	return nil
 }
 
-func (s *evergreenLogSender) convertMessage(m message.Composer) apimodels.LogMessage {
-	return apimodels.LogMessage{
-		Type:      s.logChannel,
-		Severity:  priorityToString(m.Priority()),
-		Message:   m.String(),
-		Timestamp: time.Now(),
-		Version:   evergreen.LogmessageCurrentVersion,
+func (s *sender) timedFlush() {
+	ticker := time.NewTicker(s.opts.flushInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.mu.Lock()
+			if len(s.buffer) > 0 && time.Since(s.lastFlush) >= s.opts.flushInterval {
+				if err := s.flush(s.ctx); err != nil {
+					s.opts.local.Send(message.NewErrorMessage(level.Error, err))
+				}
+			}
+			s.mu.Unlock()
+		}
 	}
 }
 
-func priorityToString(l level.Priority) string {
-	switch l {
-	case level.Trace, level.Debug:
-		return apimodels.LogDebugPrefix
-	case level.Notice, level.Info:
-		return apimodels.LogInfoPrefix
-	case level.Warning:
-		return apimodels.LogWarnPrefix
-	case level.Error, level.Alert, level.Critical, level.Emergency:
-		return apimodels.LogErrorPrefix
-	default:
-		return "UNKNOWN"
+func (s *sender) flush(ctx context.Context) error {
+	if err := s.opts.appendLines(ctx, s.buffer); err != nil {
+		return errors.Wrap(err, "appending lines to log")
 	}
+
+	s.buffer = []log.LogLine{}
+	s.bufferSize = 0
+	s.lastFlush = time.Now()
+
+	return nil
 }

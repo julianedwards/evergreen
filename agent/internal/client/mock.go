@@ -15,12 +15,14 @@ import (
 	"github.com/evergreen-ci/evergreen/cloud"
 	serviceModel "github.com/evergreen-ci/evergreen/model"
 	"github.com/evergreen-ci/evergreen/model/artifact"
+	"github.com/evergreen-ci/evergreen/model/log"
 	"github.com/evergreen-ci/evergreen/model/manifest"
 	"github.com/evergreen-ci/evergreen/model/patch"
 	patchmodel "github.com/evergreen-ci/evergreen/model/patch"
 	"github.com/evergreen-ci/evergreen/model/task"
 	"github.com/evergreen-ci/evergreen/model/testresult"
 	"github.com/evergreen-ci/evergreen/rest/model"
+	"github.com/evergreen-ci/evergreen/taskoutput"
 	"github.com/evergreen-ci/evergreen/util"
 	"github.com/evergreen-ci/utility"
 	"github.com/mongodb/grip"
@@ -70,9 +72,9 @@ type Mock struct {
 	TestLogs         []*serviceModel.TestLog
 	TestLogCount     int
 
-	logMessages map[string][]apimodels.LogMessage
-	PatchFiles  map[string]string
-	keyVal      map[string]*serviceModel.KeyVal
+	taskLogs   map[string]map[taskoutput.TaskLogType][]log.LogLine
+	PatchFiles map[string]string
+	keyVal     map[string]*serviceModel.KeyVal
 
 	// Mock data returned from methods
 	LastMessageSent  time.Time
@@ -92,7 +94,7 @@ func NewMock(serverURL string) *Mock {
 		maxAttempts:   defaultMaxAttempts,
 		timeoutStart:  defaultTimeoutStart,
 		timeoutMax:    defaultTimeoutMax,
-		logMessages:   make(map[string][]apimodels.LogMessage),
+		taskLogs:      make(map[string]map[taskoutput.TaskLogType][]log.LogLine),
 		PatchFiles:    make(map[string]string),
 		keyVal:        make(map[string]*serviceModel.KeyVal),
 		AttachedFiles: make(map[string][]*artifact.File),
@@ -322,8 +324,8 @@ func (c *Mock) GetDataPipesConfig(ctx context.Context) (*apimodels.DataPipesConf
 	}, nil
 }
 
-// SendTaskLogMessages posts tasks messages to the api server
-func (c *Mock) SendLogMessages(ctx context.Context, td TaskData, msgs []apimodels.LogMessage) error {
+// SendTaskLogMessages appends task log lines to the cache.
+func (c *Mock) SendTaskLogLines(ctx context.Context, td TaskData, logType taskoutput.TaskLogType, lines []log.LogLine) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -331,32 +333,24 @@ func (c *Mock) SendLogMessages(ctx context.Context, td TaskData, msgs []apimodel
 		return errors.New("logging failed")
 	}
 
-	c.logMessages[td.ID] = append(c.logMessages[td.ID], msgs...)
+	taskLogs, ok := c.taskLogs[td.ID]
+	if !ok {
+		taskLogs = map[taskoutput.TaskLogType][]log.LogLine{}
+		c.taskLogs[td.ID] = taskLogs
+	}
+	c.taskLogs[td.ID][logType] = append(c.taskLogs[td.ID][logType], lines...)
+	c.taskLogs[td.ID][taskoutput.TaskLogTypeAll] = append(c.taskLogs[td.ID][taskoutput.TaskLogTypeAll], lines...)
 
 	return nil
 }
 
-// GetMockMessages returns the mock's logs.
-func (c *Mock) GetMockMessages() map[string][]apimodels.LogMessage {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	out := map[string][]apimodels.LogMessage{}
-	for k, v := range c.logMessages {
-		out[k] = []apimodels.LogMessage{}
-		for _, i := range v {
-			new := apimodels.LogMessage{
-				Type:      i.Type,
-				Severity:  i.Severity,
-				Message:   i.Message,
-				Timestamp: i.Timestamp,
-				Version:   i.Version,
-			}
-			out[k] = append(out[k], new)
-		}
+func (c *Mock) GetTaskLogs(taskID string, logType taskoutput.TaskLogType) []log.LogLine {
+	taskLogs, ok := c.taskLogs[taskID]
+	if !ok {
+		return nil
 	}
 
-	return out
+	return taskLogs[logType]
 }
 
 // GetLoggerProducer constructs a single channel log producer.
@@ -364,7 +358,19 @@ func (c *Mock) GetLoggerProducer(ctx context.Context, td TaskData, config *Logge
 	if c.GetLoggerProducerShouldFail {
 		return nil, errors.New("operation run in fail mode.")
 	}
-	return NewSingleChannelLogHarness(td.ID, newEvergreenLogSender(ctx, c, apimodels.AgentLogPrefix, td, defaultLogBufferSize, defaultLogBufferTime)), nil
+
+	sender, err := newEvergreenLogSender(ctx, fmt.Sprintf("%s-%s", td.ID, taskoutput.TaskLogTypeAgent), senderOptions{
+		appendLines: func(ctx context.Context, lines []log.LogLine) error {
+			return c.SendTaskLogLines(ctx, td, taskoutput.TaskLogTypeAgent, lines)
+		},
+		maxBufferSize: defaultLogBufferSize,
+		flushInterval: defaultLogBufferTime,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return NewSingleChannelLogHarness(td.ID, sender), nil
 }
 
 func (c *Mock) GetPatchFile(ctx context.Context, td TaskData, patchFileID string) (string, error) {

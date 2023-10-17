@@ -60,6 +60,48 @@ type TaskLogGetOptions struct {
 	TailN int
 }
 
+func (o TaskLogOutput) Append(ctx context.Context, taskOpts TaskOptions, logType TaskLogType, lines []log.LogLine) error {
+	return o.AppendWithEnv(ctx, nil, taskOpts, logType, lines)
+}
+
+func (o TaskLogOutput) AppendWithEnv(ctx context.Context, env evergreen.Environment, taskOpts TaskOptions, logType TaskLogType, lines []log.LogLine) error {
+	if err := logType.validate(); err != nil {
+		return err
+	}
+	if logType == TaskLogTypeAll {
+		return errors.Errorf("cannot create a sender for task log type '%s'", TaskLogTypeAll)
+	}
+
+	svc, err := o.getLogService(ctx, env)
+	if err != nil {
+		return errors.Wrap(err, "getting log service")
+	}
+
+	return svc.Append(ctx, o.getLogName(taskOpts, logType), lines)
+}
+
+/*
+// NewSender returns a new task log sender for the given task run.
+func (o TaskLogOutput) NewSender(ctx context.Context, taskOpts TaskOptions, logType TaskLogType) (send.Sender, error) {
+	if err := logType.validate(); err != nil {
+		return nil, err
+	}
+	if logType == TaskLogTypeAll {
+		return nil, errors.Errorf("cannot create a sender for task log type '%s'", TaskLogTypeAll)
+	}
+
+	svc, err := o.getLogService(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting log service")
+	}
+
+	return log.NewSender(ctx, taskOpts.TaskID, svc, log.SenderOptions{
+		LogName:       o.getLogName(taskOpts, logType),
+		FlushInterval: time.Minute,
+	})
+}
+*/
+
 // Get returns task logs belonging to the specified task run.
 func (o TaskLogOutput) Get(ctx context.Context, env evergreen.Environment, taskOpts TaskOptions, getOpts TaskLogGetOptions) (log.LogIterator, error) {
 	if err := getOpts.LogType.validate(); err != nil {
@@ -113,7 +155,7 @@ func (o TaskLogOutput) getLogService(ctx context.Context, env evergreen.Environm
 
 // getBuildloggerLogs makes request to Cedar Buildlogger for logs.
 func (o TaskLogOutput) getBuildloggerLogs(ctx context.Context, env evergreen.Environment, taskOpts TaskOptions, getOpts TaskLogGetOptions) (log.LogIterator, error) {
-	opts := apimodels.GetBuildloggerLogsOptionsV2{
+	opts := apimodels.GetBuildloggerLogsOptions{
 		BaseURL:   env.Settings().Cedar.BaseURL,
 		TaskID:    taskOpts.TaskID,
 		Execution: utility.ToIntPtr(taskOpts.Execution),
@@ -132,5 +174,5 @@ func (o TaskLogOutput) getBuildloggerLogs(ctx context.Context, env evergreen.Env
 		opts.Tags = []string{string(getOpts.LogType)}
 	}
 
-	return apimodels.GetBuildloggerLogsV2(ctx, opts)
+	return apimodels.GetBuildloggerLogs(ctx, opts)
 }

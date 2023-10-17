@@ -16,10 +16,12 @@ import (
 	"github.com/evergreen-ci/evergreen/cloud"
 	"github.com/evergreen-ci/evergreen/model"
 	"github.com/evergreen-ci/evergreen/model/artifact"
+	"github.com/evergreen-ci/evergreen/model/log"
 	"github.com/evergreen-ci/evergreen/model/manifest"
 	patchmodel "github.com/evergreen-ci/evergreen/model/patch"
 	"github.com/evergreen-ci/evergreen/model/task"
 	restmodel "github.com/evergreen-ci/evergreen/rest/model"
+	"github.com/evergreen-ci/evergreen/taskoutput"
 	"github.com/evergreen-ci/evergreen/util"
 	"github.com/evergreen-ci/juniper/gopb"
 	"github.com/evergreen-ci/timber"
@@ -374,17 +376,17 @@ func (c *baseCommunicator) GetLoggerProducer(ctx context.Context, td TaskData, c
 	}
 	underlying := []send.Sender{}
 
-	exec, senders, err := c.makeSender(ctx, td, config.Agent, config.SendToGlobalSender, apimodels.AgentLogPrefix, evergreen.LogTypeAgent)
+	exec, senders, err := c.makeSender(ctx, td, config.Agent, config.SendToGlobalSender, apimodels.AgentLogPrefix, taskoutput.TaskLogTypeAgent)
 	if err != nil {
 		return nil, errors.Wrap(err, "making agent logger")
 	}
 	underlying = append(underlying, senders...)
-	task, senders, err := c.makeSender(ctx, td, config.Task, config.SendToGlobalSender, apimodels.TaskLogPrefix, evergreen.LogTypeTask)
+	task, senders, err := c.makeSender(ctx, td, config.Task, config.SendToGlobalSender, apimodels.TaskLogPrefix, taskoutput.TaskLogTypeTask)
 	if err != nil {
 		return nil, errors.Wrap(err, "making task logger")
 	}
 	underlying = append(underlying, senders...)
-	system, senders, err := c.makeSender(ctx, td, config.System, config.SendToGlobalSender, apimodels.SystemLogPrefix, evergreen.LogTypeSystem)
+	system, senders, err := c.makeSender(ctx, td, config.System, config.SendToGlobalSender, apimodels.SystemLogPrefix, taskoutput.TaskLogTypeSystem)
 	if err != nil {
 		return nil, errors.Wrap(err, "making system logger")
 	}
@@ -398,7 +400,7 @@ func (c *baseCommunicator) GetLoggerProducer(ctx context.Context, td TaskData, c
 	}, nil
 }
 
-func (c *baseCommunicator) makeSender(ctx context.Context, td TaskData, opts []LogOpts, sendToGlobalSender bool, prefix string, logType string) (send.Sender, []send.Sender, error) {
+func (c *baseCommunicator) makeSender(ctx context.Context, td TaskData, opts []LogOpts, sendToGlobalSender bool, prefix string, logType taskoutput.TaskLogType) (send.Sender, []send.Sender, error) {
 	levelInfo := send.LevelInfo{Default: level.Info, Threshold: level.Debug}
 	var senders []send.Sender
 	if sendToGlobalSender {
@@ -419,10 +421,11 @@ func (c *baseCommunicator) makeSender(ctx context.Context, td TaskData, opts []L
 		}
 		bufferedSenderOpts := send.BufferedSenderOptions{FlushInterval: bufferDuration, BufferSize: bufferSize}
 
-		// disallow sending system logs to S3 for security reasons
+		// Disallow sending system logs to S3 for security reasons.
 		if prefix == apimodels.SystemLogPrefix && opt.Sender == model.FileLogSender {
-			opt.Sender = model.EvergreenLogSender
+			return nil, nil, errors.New("cannot use a file logger for system logs")
 		}
+
 		switch opt.Sender {
 		case model.FileLogSender:
 			sender, err = send.NewPlainFileLogger(prefix, opt.Filepath, levelInfo)
@@ -466,7 +469,7 @@ func (c *baseCommunicator) makeSender(ctx context.Context, td TaskData, opts []L
 				TaskName:      tk.DisplayName,
 				TaskID:        tk.Id,
 				Execution:     int32(tk.Execution),
-				Tags:          append(tk.Tags, logType, utility.RandomString()),
+				Tags:          append(tk.Tags, string(logType), utility.RandomString()),
 				Mainline:      !evergreen.IsPatchRequester(tk.Requester),
 				Storage:       buildlogger.LogStorageS3,
 				MaxBufferSize: opt.BufferSize,
@@ -478,7 +481,16 @@ func (c *baseCommunicator) makeSender(ctx context.Context, td TaskData, opts []L
 				return nil, nil, errors.Wrap(err, "creating Buildlogger logger")
 			}
 		default:
-			sender = newEvergreenLogSender(ctx, c, prefix, td, bufferSize, bufferDuration)
+			sender, err = newEvergreenLogSender(ctx, fmt.Sprintf("%s-%s", td.ID, logType), senderOptions{
+				appendLines: func(ctx context.Context, lines []log.LogLine) error {
+					return c.SendTaskLogLines(ctx, td, logType, lines)
+				},
+				maxBufferSize: bufferSize,
+				flushInterval: bufferDuration,
+			})
+			if err != nil {
+				return nil, nil, errors.Wrap(err, "creating logger")
+			}
 		}
 
 		grip.Error(sender.SetFormatter(send.MakeDefaultFormatter()))
@@ -491,27 +503,20 @@ func (c *baseCommunicator) makeSender(ctx context.Context, td TaskData, opts []L
 	return send.NewConfiguredMultiSender(senders...), underlyingBufferedSenders, nil
 }
 
-// SendLogMessages posts a group of log messages for a task.
-func (c *baseCommunicator) SendLogMessages(ctx context.Context, taskData TaskData, msgs []apimodels.LogMessage) error {
-	if len(msgs) == 0 {
+// SendTaskLogLines appends a group of task log lines for a task.
+func (c *baseCommunicator) SendTaskLogLines(ctx context.Context, taskData TaskData, logType taskoutput.TaskLogType, lines []log.LogLine) error {
+	if len(lines) == 0 {
 		return nil
-	}
-
-	payload := apimodels.TaskLog{
-		TaskId:       taskData.ID,
-		Timestamp:    time.Now(),
-		MessageCount: len(msgs),
-		Messages:     msgs,
 	}
 
 	info := requestInfo{
 		method:   http.MethodPost,
 		taskData: &taskData,
 	}
-	info.setTaskPathSuffix("log")
+	info.setTaskPathSuffix(fmt.Sprintf("task_log/%s", logType))
 	var cancel context.CancelFunc
 	now := time.Now()
-	grip.Debugf("sending %d log messages", payload.MessageCount)
+	grip.Debugf("sending %d task log lines", len(lines))
 	ctx, cancel = context.WithDeadline(ctx, now.Add(10*time.Minute))
 	defer cancel()
 	backupTimer := time.NewTimer(15 * time.Minute)
@@ -528,11 +533,11 @@ func (c *baseCommunicator) SendLogMessages(ctx context.Context, taskData TaskDat
 			return
 		case t := <-backupTimer.C:
 			grip.Alert(message.Fields{
-				"message":  "retryRequest exceeded 15 minutes",
-				"start":    now.String(),
-				"end":      t.String(),
-				"task":     taskData.ID,
-				"messages": msgs,
+				"message": "retryRequest exceeded 15 minutes",
+				"start":   now.String(),
+				"end":     t.String(),
+				"task":    taskData.ID,
+				"lines":   lines,
 			})
 			cancel()
 			return
@@ -540,9 +545,9 @@ func (c *baseCommunicator) SendLogMessages(ctx context.Context, taskData TaskDat
 			return
 		}
 	}()
-	resp, err := c.retryRequest(ctx, info, &payload)
+	resp, err := c.retryRequest(ctx, info, &lines)
 	if err != nil {
-		return util.RespErrorf(resp, errors.Wrapf(err, "sending %d log messages", len(msgs)).Error())
+		return util.RespErrorf(resp, errors.Wrapf(err, "sending %d log messages", len(lines)).Error())
 	}
 	defer resp.Body.Close()
 	return nil

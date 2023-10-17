@@ -9,10 +9,12 @@ import (
 	"github.com/evergreen-ci/evergreen/cloud"
 	"github.com/evergreen-ci/evergreen/model"
 	"github.com/evergreen-ci/evergreen/model/artifact"
+	"github.com/evergreen-ci/evergreen/model/log"
 	"github.com/evergreen-ci/evergreen/model/manifest"
 	patchmodel "github.com/evergreen-ci/evergreen/model/patch"
 	"github.com/evergreen-ci/evergreen/model/task"
 	restmodel "github.com/evergreen-ci/evergreen/rest/model"
+	"github.com/evergreen-ci/evergreen/taskoutput"
 	"github.com/mongodb/grip"
 	"google.golang.org/grpc"
 )
@@ -87,8 +89,8 @@ type SharedCommunicator interface {
 	GetLoggerProducer(context.Context, TaskData, *LoggerConfig) (LoggerProducer, error)
 	// GetLoggerMetadata() LoggerMetadata
 
-	// SendLogMessages sends a group of log messages to the API Server
-	SendLogMessages(context.Context, TaskData, []apimodels.LogMessage) error
+	// SendTaskLogLines sends a group of task log lines to the API Server.
+	SendTaskLogLines(context.Context, TaskData, taskoutput.TaskLogType, []log.LogLine) error
 
 	// The following operations are used by task commands.
 	SendTestLog(context.Context, TaskData, *model.TestLog) (string, error)

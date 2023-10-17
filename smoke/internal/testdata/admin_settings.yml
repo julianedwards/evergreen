@@ -88,3 +88,8 @@ cedar:
   user: "user"
   api_key: "key"
   insecure: true
+
+buckets:
+  log_bucket:
+    name: "logs"
+    type: "gridfs"
