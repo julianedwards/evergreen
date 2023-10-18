@@ -15,6 +15,7 @@ import (
 	"github.com/evergreen-ci/evergreen/model"
 	"github.com/evergreen-ci/evergreen/model/patch"
 	"github.com/evergreen-ci/evergreen/model/task"
+	"github.com/evergreen-ci/evergreen/taskoutput"
 	"github.com/evergreen-ci/evergreen/thirdparty"
 	"github.com/evergreen-ci/evergreen/util"
 	"github.com/google/shlex"
@@ -163,8 +164,8 @@ func TestGitPush(t *testing.T) {
 			}
 
 			assert.NoError(t, logger.Close())
-			msgs := comm.GetMockMessages()[""]
-			assert.Equal(t, "The key: [redacted oauth token]", msgs[len(msgs)-1].Message)
+			lines := comm.GetTaskLogs("", taskoutput.TaskLogTypeAll)
+			assert.Equal(t, "The key: [redacted oauth token]", lines[len(lines)-1].Data)
 		},
 		"RevParse": func(*testing.T) {
 			manager := &mock.Manager{}

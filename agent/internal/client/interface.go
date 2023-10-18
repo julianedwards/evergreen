@@ -89,7 +89,8 @@ type SharedCommunicator interface {
 	GetLoggerProducer(context.Context, TaskData, *LoggerConfig) (LoggerProducer, error)
 	// GetLoggerMetadata() LoggerMetadata
 
-	// SendTaskLogLines sends a group of task log lines to the API Server.
+	// SendTaskLogLines sends a group of task log lines to be persisted by
+	// the API Server.
 	SendTaskLogLines(context.Context, TaskData, taskoutput.TaskLogType, []log.LogLine) error
 
 	// The following operations are used by task commands.

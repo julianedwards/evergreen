@@ -333,10 +333,8 @@ func (c *Mock) SendTaskLogLines(ctx context.Context, td TaskData, logType taskou
 		return errors.New("logging failed")
 	}
 
-	taskLogs, ok := c.taskLogs[td.ID]
-	if !ok {
-		taskLogs = map[taskoutput.TaskLogType][]log.LogLine{}
-		c.taskLogs[td.ID] = taskLogs
+	if _, ok := c.taskLogs[td.ID]; !ok {
+		c.taskLogs[td.ID] = map[taskoutput.TaskLogType][]log.LogLine{}
 	}
 	c.taskLogs[td.ID][logType] = append(c.taskLogs[td.ID][logType], lines...)
 	c.taskLogs[td.ID][taskoutput.TaskLogTypeAll] = append(c.taskLogs[td.ID][taskoutput.TaskLogTypeAll], lines...)

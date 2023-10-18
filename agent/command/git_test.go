@@ -22,6 +22,7 @@ import (
 	"github.com/evergreen-ci/evergreen/model/patch"
 	"github.com/evergreen-ci/evergreen/model/task"
 	modelutil "github.com/evergreen-ci/evergreen/model/testutil"
+	"github.com/evergreen-ci/evergreen/taskoutput"
 	"github.com/evergreen-ci/evergreen/testutil"
 	"github.com/evergreen-ci/evergreen/thirdparty"
 	"github.com/evergreen-ci/evergreen/util"
@@ -343,17 +344,15 @@ func (s *GitGetProjectSuite) TestTokenScrubbedFromLogger() {
 	s.NoError(logger.Close())
 	foundCloneCommand := false
 	foundCloneErr := false
-	for _, msgs := range s.comm.GetMockMessages() {
-		for _, msg := range msgs {
-			if strings.Contains(msg.Message, "https://[redacted oauth token]:x-oauth-basic@github.com/evergreen-ci/doesntexist.git") {
-				foundCloneCommand = true
-			}
-			if strings.Contains(msg.Message, "Repository not found.") {
-				foundCloneErr = true
-			}
-			if strings.Contains(msg.Message, token) {
-				s.FailNow("token was leaked")
-			}
+	for _, line := range s.comm.GetTaskLogs(conf.Task.Id, taskoutput.TaskLogTypeAll) {
+		if strings.Contains(line.Data, "https://[redacted oauth token]:x-oauth-basic@github.com/evergreen-ci/doesntexist.git") {
+			foundCloneCommand = true
+		}
+		if strings.Contains(line.Data, "Repository not found.") {
+			foundCloneErr = true
+		}
+		if strings.Contains(line.Data, token) {
+			s.FailNow("token was leaked")
 		}
 	}
 	s.True(foundCloneCommand)
@@ -388,17 +387,15 @@ func (s *GitGetProjectSuite) TestStdErrLogged() {
 	foundCloneCommand := false
 	foundCloneErr := false
 	foundSSHErr := false
-	for _, msgs := range s.comm.GetMockMessages() {
-		for _, msg := range msgs {
-			if strings.Contains(msg.Message, "git clone 'git@github.com:evergreen-ci/doesntexist.git' 'src' --branch 'main'") {
-				foundCloneCommand = true
-			}
-			if strings.Contains(msg.Message, "ERROR: Repository not found.") {
-				foundCloneErr = true
-			}
-			if strings.Contains(msg.Message, "Permission denied (publickey)") || strings.Contains(msg.Message, "Host key verification failed.") {
-				foundSSHErr = true
-			}
+	for _, line := range s.comm.GetTaskLogs(conf.Task.Id, taskoutput.TaskLogTypeAll) {
+		if strings.Contains(line.Data, "git clone 'git@github.com:evergreen-ci/doesntexist.git' 'src' --branch 'main'") {
+			foundCloneCommand = true
+		}
+		if strings.Contains(line.Data, "ERROR: Repository not found.") {
+			foundCloneErr = true
+		}
+		if strings.Contains(line.Data, "Permission denied (publickey)") || strings.Contains(line.Data, "Host key verification failed.") {
+			foundSSHErr = true
 		}
 	}
 	s.True(foundCloneCommand)
@@ -800,11 +797,9 @@ func (s *GitGetProjectSuite) TestCorrectModuleRevisionSetModule() {
 	s.NoError(logger.Close())
 	toCheck := `Using revision/ref 'b27779f856b211ffaf97cbc124b7082a20ea8bc0' for module 'sample' (reason: specified in set-module).`
 	foundMsg := false
-	for _, task := range s.comm.GetMockMessages() {
-		for _, msg := range task {
-			if msg.Message == toCheck {
-				foundMsg = true
-			}
+	for _, line := range s.comm.GetTaskLogs(conf.Task.Id, taskoutput.TaskLogTypeAll) {
+		if line.Data == toCheck {
+			foundMsg = true
 		}
 	}
 	s.True(foundMsg)
@@ -842,11 +837,9 @@ func (s *GitGetProjectSuite) TestCorrectModuleRevisionManifest() {
 	s.NoError(logger.Close())
 	toCheck := `Using revision/ref '3585388b1591dfca47ac26a5b9a564ec8f138a5e' for module 'sample' (reason: from manifest).`
 	foundMsg := false
-	for _, task := range s.comm.GetMockMessages() {
-		for _, msg := range task {
-			if msg.Message == toCheck {
-				foundMsg = true
-			}
+	for _, line := range s.comm.GetTaskLogs(conf.Task.Id, taskoutput.TaskLogTypeAll) {
+		if line.Data == toCheck {
+			foundMsg = true
 		}
 	}
 	s.True(foundMsg)
