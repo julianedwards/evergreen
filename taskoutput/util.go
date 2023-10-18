@@ -7,9 +7,10 @@ import (
 	"github.com/evergreen-ci/pail"
 	"github.com/evergreen-ci/utility"
 	"github.com/pkg/errors"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
-func newBucket(ctx context.Context, env evergreen.Environment, bucketName, bucketType string) (pail.Bucket, error) {
+func newBucket(ctx context.Context, bucketName, bucketType string) (pail.Bucket, error) {
 	var (
 		b   pail.Bucket
 		err error
@@ -27,13 +28,14 @@ func newBucket(ctx context.Context, env evergreen.Environment, bucketName, bucke
 			return nil, errors.WithStack(err)
 		}
 	case evergreen.BucketTypeGridFS:
-		if env == nil {
-			return nil, errors.New("cannot create GridFS bucket without environment")
+		client, err := mongo.Connect(ctx)
+		if err != nil {
+			return nil, errors.Wrap(err, "connecting to the GridFS DB")
 		}
 
-		b, err = pail.NewGridFSBucketWithClient(ctx, env.Client(), pail.GridFSOptions{
+		b, err = pail.NewGridFSBucketWithClient(ctx, client, pail.GridFSOptions{
 			Name:     bucketName,
-			Database: env.DB().Name(),
+			Database: "taskoutput",
 		})
 		if err != nil {
 			return nil, errors.WithStack(err)

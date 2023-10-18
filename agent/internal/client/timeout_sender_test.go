@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -25,20 +24,12 @@ import (
 )
 
 func TestTimeoutSender(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	comm := NewMock("url")
 	td := TaskData{ID: "task", Secret: "secret"}
-	sender, err := newEvergreenLogSender(ctx, "test_timeout_sender", senderOptions{
-		appendLines: func(ctx context.Context, lines []log.LogLine) error {
-			return comm.SendTaskLogLines(ctx, td, taskoutput.TaskLogTypeAgent, lines)
-		},
-		maxBufferSize: defaultLogBufferSize,
-		flushInterval: 10 * time.Millisecond,
+	ms := newMockSender("test_timeout_sender", func(line log.LogLine) error {
+		return comm.sendTaskLogLine(td, taskoutput.TaskLogTypeAgent, line)
 	})
-	require.NoError(t, err)
-	sender = makeTimeoutLogSender(sender, comm)
+	sender := makeTimeoutLogSender(ms, comm)
 
 	// If no messages are sent, the last message time *should not* update.
 	last1 := comm.LastMessageAt()
@@ -121,33 +112,6 @@ func (s *logSenderSuite) TestFileLogger() {
 	path := filepath.Join(s.tempDir, "nothere")
 	_, _, err = s.restClient.makeSender(context.Background(), TaskData{}, []LogOpts{{Sender: model.FileLogSender, Filepath: path}}, false, apimodels.SystemLogPrefix, "")
 	s.Error(err)
-}
-
-func (s *logSenderSuite) TestEvergreenLogger() {
-	ctx := context.Background()
-	comm := NewMock("url")
-	td := TaskData{ID: "task", Secret: "secret"}
-	sender, err := newEvergreenLogSender(ctx, "test_timeout_sender", senderOptions{
-		appendLines: func(ctx context.Context, lines []log.LogLine) error {
-			return comm.SendTaskLogLines(ctx, td, taskoutput.TaskLogTypeAgent, lines)
-		},
-		maxBufferSize: defaultLogBufferSize,
-		flushInterval: 1 * time.Millisecond,
-	})
-	s.Require().NoError(err)
-	sender = makeTimeoutLogSender(sender, comm)
-	logger := logging.MakeGrip(sender)
-
-	for i := 0; i < s.numMessages; i++ {
-		logger.Debug(i)
-		s.randomSleep()
-	}
-	s.NoError(sender.Close())
-
-	lines := comm.GetTaskLogs(td.ID, taskoutput.TaskLogTypeAgent)
-	for i, line := range lines {
-		s.Equal(strconv.Itoa(i), line.Data)
-	}
 }
 
 func (s *logSenderSuite) TestMisconfiguredSender() {

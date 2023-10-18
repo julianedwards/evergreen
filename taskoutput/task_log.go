@@ -8,6 +8,7 @@ import (
 	"github.com/evergreen-ci/evergreen/apimodels"
 	"github.com/evergreen-ci/evergreen/model/log"
 	"github.com/evergreen-ci/utility"
+	"github.com/mongodb/grip/send"
 	"github.com/pkg/errors"
 )
 
@@ -21,13 +22,18 @@ const (
 	TaskLogTypeTask   TaskLogType = "task_log"
 )
 
-func (t TaskLogType) validate() error {
+func (t TaskLogType) validate(writing bool) error {
 	switch t {
 	case TaskLogTypeAll, TaskLogTypeAgent, TaskLogTypeSystem, TaskLogTypeTask:
-		return nil
 	default:
 		return errors.Errorf("unrecognized task log type '%s'", t)
 	}
+
+	if writing && t == TaskLogTypeAll {
+		return errors.Errorf("cannot persist task log type '%s'", TaskLogTypeAll)
+	}
+
+	return nil
 }
 
 // TaskLogOutput is the versioned entry point for coordinating persistent
@@ -60,34 +66,10 @@ type TaskLogGetOptions struct {
 	TailN int
 }
 
-func (o TaskLogOutput) Append(ctx context.Context, taskOpts TaskOptions, logType TaskLogType, lines []log.LogLine) error {
-	return o.AppendWithEnv(ctx, nil, taskOpts, logType, lines)
-}
-
-func (o TaskLogOutput) AppendWithEnv(ctx context.Context, env evergreen.Environment, taskOpts TaskOptions, logType TaskLogType, lines []log.LogLine) error {
-	if err := logType.validate(); err != nil {
-		return err
-	}
-	if logType == TaskLogTypeAll {
-		return errors.Errorf("cannot create a sender for task log type '%s'", TaskLogTypeAll)
-	}
-
-	svc, err := o.getLogService(ctx, env)
-	if err != nil {
-		return errors.Wrap(err, "getting log service")
-	}
-
-	return svc.Append(ctx, o.getLogName(taskOpts, logType), lines)
-}
-
-/*
 // NewSender returns a new task log sender for the given task run.
-func (o TaskLogOutput) NewSender(ctx context.Context, taskOpts TaskOptions, logType TaskLogType) (send.Sender, error) {
-	if err := logType.validate(); err != nil {
+func (o TaskLogOutput) NewSender(ctx context.Context, taskOpts TaskOptions, senderOpts EvergreenSenderOptions, logType TaskLogType) (send.Sender, error) {
+	if err := logType.validate(true); err != nil {
 		return nil, err
-	}
-	if logType == TaskLogTypeAll {
-		return nil, errors.Errorf("cannot create a sender for task log type '%s'", TaskLogTypeAll)
 	}
 
 	svc, err := o.getLogService(ctx)
@@ -95,16 +77,16 @@ func (o TaskLogOutput) NewSender(ctx context.Context, taskOpts TaskOptions, logT
 		return nil, errors.Wrap(err, "getting log service")
 	}
 
-	return log.NewSender(ctx, taskOpts.TaskID, svc, log.SenderOptions{
-		LogName:       o.getLogName(taskOpts, logType),
-		FlushInterval: time.Minute,
-	})
+	senderOpts.appendLines = func(ctx context.Context, lines []log.LogLine) error {
+		return svc.Append(ctx, o.getLogName(taskOpts, logType), lines)
+	}
+
+	return newEvergreenSender(ctx, fmt.Sprintf("%s-%s", taskOpts.TaskID, logType), senderOpts)
 }
-*/
 
 // Get returns task logs belonging to the specified task run.
 func (o TaskLogOutput) Get(ctx context.Context, env evergreen.Environment, taskOpts TaskOptions, getOpts TaskLogGetOptions) (log.LogIterator, error) {
-	if err := getOpts.LogType.validate(); err != nil {
+	if err := getOpts.LogType.validate(false); err != nil {
 		return nil, err
 	}
 
@@ -112,7 +94,7 @@ func (o TaskLogOutput) Get(ctx context.Context, env evergreen.Environment, taskO
 		return o.getBuildloggerLogs(ctx, env, taskOpts, getOpts)
 	}
 
-	svc, err := o.getLogService(ctx, env)
+	svc, err := o.getLogService(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting log service")
 	}
@@ -144,8 +126,8 @@ func (o TaskLogOutput) getLogName(taskOpts TaskOptions, logType TaskLogType) str
 	return fmt.Sprintf("%s/%s", prefix, logTypePrefix)
 }
 
-func (o TaskLogOutput) getLogService(ctx context.Context, env evergreen.Environment) (log.LogService, error) {
-	b, err := newBucket(ctx, env, o.BucketName, o.BucketType)
+func (o TaskLogOutput) getLogService(ctx context.Context) (log.LogService, error) {
+	b, err := newBucket(ctx, o.BucketName, o.BucketType)
 	if err != nil {
 		return nil, err
 	}

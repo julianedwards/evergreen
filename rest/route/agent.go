@@ -14,11 +14,9 @@ import (
 	"github.com/evergreen-ci/evergreen/model/build"
 	"github.com/evergreen-ci/evergreen/model/event"
 	"github.com/evergreen-ci/evergreen/model/host"
-	"github.com/evergreen-ci/evergreen/model/log"
 	"github.com/evergreen-ci/evergreen/model/manifest"
 	"github.com/evergreen-ci/evergreen/model/patch"
 	"github.com/evergreen-ci/evergreen/model/task"
-	"github.com/evergreen-ci/evergreen/taskoutput"
 	"github.com/evergreen-ci/evergreen/thirdparty"
 	"github.com/evergreen-ci/gimlet"
 	"github.com/evergreen-ci/utility"
@@ -853,70 +851,6 @@ func (h *fetchTaskHandler) Run(ctx context.Context) gimlet.Responder {
 		})
 	}
 	return gimlet.NewJSONResponse(t)
-}
-
-// POST /task/{task_id}/task_log/{log_type}
-type appendTaskLogHandler struct {
-	env     evergreen.Environment
-	taskID  string
-	logType string
-	lines   []log.LogLine
-}
-
-func makeAppendTaskLog(env evergreen.Environment) gimlet.RouteHandler {
-	return &appendTaskLogHandler{
-		env: env,
-	}
-}
-
-func (h *appendTaskLogHandler) Factory() gimlet.RouteHandler {
-	return &appendTaskLogHandler{
-		env: h.env,
-	}
-}
-
-func (h *appendTaskLogHandler) Parse(ctx context.Context, r *http.Request) error {
-	if h.taskID = gimlet.GetVars(r)["task_id"]; h.taskID == "" {
-		return errors.New("missing task ID")
-	}
-	if h.logType = gimlet.GetVars(r)["log_type"]; h.logType == "" {
-		return errors.New("missing task log type")
-	}
-	if err := utility.ReadJSON(r.Body, &h.lines); err != nil {
-		return errors.Wrap(err, "reading task log lines from JSON request body")
-	}
-	return nil
-}
-
-// Run appends the received logs to the task's internal logs.
-func (h *appendTaskLogHandler) Run(ctx context.Context) gimlet.Responder {
-	if h.env.Settings().ServiceFlags.TaskLoggingDisabled {
-		return gimlet.MakeJSONErrorResponder(gimlet.ErrorResponse{
-			StatusCode: http.StatusConflict,
-			Message:    "task logging is disabled",
-		})
-	}
-	t, err := task.FindOneId(h.taskID)
-	if err != nil {
-		return gimlet.MakeJSONInternalErrorResponder(errors.Wrapf(err, "finding task '%s'", h.taskID))
-	}
-	if t == nil {
-		return gimlet.MakeJSONErrorResponder(gimlet.ErrorResponse{
-			StatusCode: http.StatusNotFound,
-			Message:    fmt.Sprintf("task '%s' not found", h.taskID),
-		})
-	}
-
-	taskInfo := taskoutput.TaskOptions{
-		ProjectID: t.Project,
-		TaskID:    t.Id,
-		Execution: t.Execution,
-	}
-	if err = t.TaskOutputInfo.TaskLogs.AppendWithEnv(ctx, h.env, taskInfo, taskoutput.TaskLogType(h.logType), h.lines); err != nil {
-		return gimlet.MakeJSONInternalErrorResponder(err)
-	}
-
-	return gimlet.NewJSONResponse("logs added")
 }
 
 // POST /task/{task_id}/start

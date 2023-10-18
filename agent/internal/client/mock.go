@@ -26,6 +26,8 @@ import (
 	"github.com/evergreen-ci/evergreen/util"
 	"github.com/evergreen-ci/utility"
 	"github.com/mongodb/grip"
+	"github.com/mongodb/grip/message"
+	"github.com/mongodb/grip/send"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 )
@@ -324,8 +326,21 @@ func (c *Mock) GetDataPipesConfig(ctx context.Context) (*apimodels.DataPipesConf
 	}, nil
 }
 
-// SendTaskLogMessages appends task log lines to the cache.
-func (c *Mock) SendTaskLogLines(ctx context.Context, td TaskData, logType taskoutput.TaskLogType, lines []log.LogLine) error {
+// GetLoggerProducer constructs a single channel log producer.
+func (c *Mock) GetLoggerProducer(ctx context.Context, td TaskData, config *LoggerConfig) (LoggerProducer, error) {
+	if c.GetLoggerProducerShouldFail {
+		return nil, errors.New("operation run in fail mode.")
+	}
+
+	appendLine := func(line log.LogLine) error {
+		return c.sendTaskLogLine(td, taskoutput.TaskLogTypeAgent, line)
+	}
+
+	return NewSingleChannelLogHarness(td.ID, newMockSender("mock", appendLine)), nil
+}
+
+// sendTaskLine appends a task log line to the cache.
+func (c *Mock) sendTaskLogLine(td TaskData, logType taskoutput.TaskLogType, line log.LogLine) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -336,8 +351,8 @@ func (c *Mock) SendTaskLogLines(ctx context.Context, td TaskData, logType taskou
 	if _, ok := c.taskLogs[td.ID]; !ok {
 		c.taskLogs[td.ID] = map[taskoutput.TaskLogType][]log.LogLine{}
 	}
-	c.taskLogs[td.ID][logType] = append(c.taskLogs[td.ID][logType], lines...)
-	c.taskLogs[td.ID][taskoutput.TaskLogTypeAll] = append(c.taskLogs[td.ID][taskoutput.TaskLogTypeAll], lines...)
+	c.taskLogs[td.ID][logType] = append(c.taskLogs[td.ID][logType], line)
+	c.taskLogs[td.ID][taskoutput.TaskLogTypeAll] = append(c.taskLogs[td.ID][taskoutput.TaskLogTypeAll], line)
 
 	return nil
 }
@@ -349,26 +364,6 @@ func (c *Mock) GetTaskLogs(taskID string, logType taskoutput.TaskLogType) []log.
 	}
 
 	return taskLogs[logType]
-}
-
-// GetLoggerProducer constructs a single channel log producer.
-func (c *Mock) GetLoggerProducer(ctx context.Context, td TaskData, config *LoggerConfig) (LoggerProducer, error) {
-	if c.GetLoggerProducerShouldFail {
-		return nil, errors.New("operation run in fail mode.")
-	}
-
-	sender, err := newEvergreenLogSender(ctx, fmt.Sprintf("%s-%s", td.ID, taskoutput.TaskLogTypeAgent), senderOptions{
-		appendLines: func(ctx context.Context, lines []log.LogLine) error {
-			return c.SendTaskLogLines(ctx, td, taskoutput.TaskLogTypeAgent, lines)
-		},
-		maxBufferSize: defaultLogBufferSize,
-		flushInterval: defaultLogBufferTime,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return NewSingleChannelLogHarness(td.ID, sender), nil
 }
 
 func (c *Mock) GetPatchFile(ctx context.Context, td TaskData, patchFileID string) (string, error) {
@@ -534,3 +529,34 @@ func (c *Mock) GetPullRequestInfo(ctx context.Context, taskData TaskData, prNum 
 func (c *Mock) CreateInstallationToken(ctx context.Context, td TaskData, owner, repo string) (string, error) {
 	return "token", nil
 }
+
+type mockSender struct {
+	appendLine func(log.LogLine) error
+	lastErr    error
+	*send.Base
+}
+
+func newMockSender(name string, appendLine func(log.LogLine) error) *mockSender {
+	return &mockSender{
+		appendLine: appendLine,
+		Base:       send.NewBase(name),
+	}
+}
+
+func (s *mockSender) Send(m message.Composer) {
+	ts := time.Now().UnixNano()
+
+	if !s.Level().ShouldLog(m) {
+		return
+	}
+
+	if err := s.appendLine(log.LogLine{
+		Priority:  m.Priority(),
+		Timestamp: ts,
+		Data:      m.String(),
+	}); err != nil {
+		s.lastErr = err
+	}
+}
+
+func (s *mockSender) Flush(_ context.Context) error { return nil }

@@ -16,7 +16,6 @@ import (
 	"github.com/evergreen-ci/evergreen/cloud"
 	"github.com/evergreen-ci/evergreen/model"
 	"github.com/evergreen-ci/evergreen/model/artifact"
-	"github.com/evergreen-ci/evergreen/model/log"
 	"github.com/evergreen-ci/evergreen/model/manifest"
 	patchmodel "github.com/evergreen-ci/evergreen/model/patch"
 	"github.com/evergreen-ci/evergreen/model/task"
@@ -31,7 +30,6 @@ import (
 	"github.com/mongodb/grip/level"
 	"github.com/mongodb/grip/logging"
 	"github.com/mongodb/grip/message"
-	"github.com/mongodb/grip/recovery"
 	"github.com/mongodb/grip/send"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
@@ -481,15 +479,26 @@ func (c *baseCommunicator) makeSender(ctx context.Context, td TaskData, opts []L
 				return nil, nil, errors.Wrap(err, "creating Buildlogger logger")
 			}
 		default:
-			sender, err = newEvergreenLogSender(ctx, fmt.Sprintf("%s-%s", td.ID, logType), senderOptions{
-				appendLines: func(ctx context.Context, lines []log.LogLine) error {
-					return c.SendTaskLogLines(ctx, td, logType, lines)
-				},
-				maxBufferSize: bufferSize,
-				flushInterval: bufferDuration,
-			})
+			tk, err := c.GetTask(ctx, td)
 			if err != nil {
-				return nil, nil, errors.Wrap(err, "creating logger")
+				return nil, nil, errors.Wrap(err, "getting task")
+			}
+
+			taskOpts := taskoutput.TaskOptions{
+				ProjectID: tk.Project,
+				TaskID:    tk.Id,
+				Execution: tk.Execution,
+			}
+			senderOpts := taskoutput.EvergreenSenderOptions{
+				MaxBufferSize: bufferSize,
+				FlushInterval: bufferDuration,
+			}
+			// TODO: Should there be a function to get the task
+			// output info and return a programmatic error if it is
+			// nil?
+			sender, err = tk.TaskOutputInfo.TaskLogs.NewSender(ctx, taskOpts, senderOpts, logType)
+			if err != nil {
+				return nil, nil, errors.Wrap(err, "creating Evergreen task log sender")
 			}
 		}
 
@@ -501,56 +510,6 @@ func (c *baseCommunicator) makeSender(ctx context.Context, td TaskData, opts []L
 	}
 
 	return send.NewConfiguredMultiSender(senders...), underlyingBufferedSenders, nil
-}
-
-// SendTaskLogLines appends a group of task log lines for a task.
-func (c *baseCommunicator) SendTaskLogLines(ctx context.Context, taskData TaskData, logType taskoutput.TaskLogType, lines []log.LogLine) error {
-	if len(lines) == 0 {
-		return nil
-	}
-
-	info := requestInfo{
-		method:   http.MethodPost,
-		taskData: &taskData,
-	}
-	info.setTaskPathSuffix(fmt.Sprintf("task_log/%s", logType))
-	var cancel context.CancelFunc
-	now := time.Now()
-	grip.Debugf("sending %d task log lines", len(lines))
-	ctx, cancel = context.WithDeadline(ctx, now.Add(10*time.Minute))
-	defer cancel()
-	backupTimer := time.NewTimer(15 * time.Minute)
-	defer backupTimer.Stop()
-	doneChan := make(chan struct{})
-	defer func() {
-		close(doneChan)
-	}()
-	go func() {
-		defer recovery.LogStackTraceAndExit("backup timer")
-		select {
-		case <-ctx.Done():
-			grip.Infof("Request completed or task ending, stopping backup timer thread: %s.", ctx.Err())
-			return
-		case t := <-backupTimer.C:
-			grip.Alert(message.Fields{
-				"message": "retryRequest exceeded 15 minutes",
-				"start":   now.String(),
-				"end":     t.String(),
-				"task":    taskData.ID,
-				"lines":   lines,
-			})
-			cancel()
-			return
-		case <-doneChan:
-			return
-		}
-	}()
-	resp, err := c.retryRequest(ctx, info, &lines)
-	if err != nil {
-		return util.RespErrorf(resp, errors.Wrapf(err, "sending %d log messages", len(lines)).Error())
-	}
-	defer resp.Body.Close()
-	return nil
 }
 
 func (c *baseCommunicator) GetPullRequestInfo(ctx context.Context, taskData TaskData, prNum int, owner, repo string, lastAttempt bool) (*apimodels.PullRequestInfo, error) {
