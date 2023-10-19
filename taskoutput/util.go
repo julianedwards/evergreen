@@ -10,11 +10,11 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-func newBucket(ctx context.Context, bucketName, bucketType string) (pail.Bucket, error) {
-	switch bucketType {
+func newBucket(ctx context.Context, config evergreen.BucketConfig) (pail.Bucket, error) {
+	switch config.Type {
 	case evergreen.BucketTypeS3:
 		return pail.NewS3Bucket(pail.S3Options{
-			Name:        bucketName,
+			Name:        config.Name,
 			Region:      evergreen.DefaultEC2Region,
 			Permissions: pail.S3PermissionsPrivate,
 			MaxRetries:  utility.ToIntPtr(10),
@@ -27,12 +27,12 @@ func newBucket(ctx context.Context, bucketName, bucketType string) (pail.Bucket,
 		}
 
 		return pail.NewGridFSBucketWithClient(ctx, client, pail.GridFSOptions{
-			Name:     bucketName,
-			Database: "taskoutput",
+			Name:     config.Name,
+			Database: config.DBName,
 		})
 	case evergreen.BucketTypeLocal:
-		return pail.NewLocalBucket(pail.LocalOptions{Path: bucketName})
+		return pail.NewLocalBucket(pail.LocalOptions{Path: config.Name})
 	default:
-		return nil, errors.Errorf("unrecognized bucket type '%s'", bucketType)
+		return nil, errors.Errorf("unrecognized bucket type '%s'", config.Type)
 	}
 }

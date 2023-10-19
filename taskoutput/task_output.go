@@ -27,11 +27,9 @@ func InitializeTaskOutput(env evergreen.Environment, opts TaskOptions) *TaskOutp
 	output := &TaskOutput{}
 	if settings.LoggerConfig.DefaultLogger != "buildlogger" {
 		output.TaskLogs.Version = 1
-		output.TaskLogs.BucketName = settings.Buckets.LogBucket.Name
-		output.TaskLogs.BucketType = settings.Buckets.LogBucket.Type
+		output.TaskLogs.BucketConfig = settings.Buckets.LogBucket
 		output.TestLogs.Version = 1
-		output.TestLogs.BucketName = settings.Buckets.LogBucket.Name
-		output.TestLogs.BucketType = settings.Buckets.LogBucket.Type
+		output.TestLogs.BucketConfig = settings.Buckets.LogBucket
 	}
 
 	return output

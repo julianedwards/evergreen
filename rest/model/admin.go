@@ -15,7 +15,7 @@ func NewConfigModel() *APIAdminSettings {
 		Amboy:             &APIAmboyConfig{},
 		Api:               &APIapiConfig{},
 		AuthConfig:        &APIAuthConfig{},
-		Buckets:           &APIBucketConfig{},
+		Buckets:           &APIBucketsConfig{},
 		Cedar:             &APICedarConfig{},
 		CommitQueue:       &APICommitQueueConfig{},
 		ContainerPools:    &APIContainerPoolsConfig{},
@@ -57,7 +57,7 @@ type APIAdminSettings struct {
 	AuthConfig          *APIAuthConfig                    `json:"auth,omitempty"`
 	Banner              *string                           `json:"banner,omitempty"`
 	BannerTheme         *string                           `json:"banner_theme,omitempty"`
-	Buckets             *APIBucketConfig                  `json:"buckets,omitempty"`
+	Buckets             *APIBucketsConfig                 `json:"buckets,omitempty"`
 	Cedar               *APICedarConfig                   `json:"cedar,omitempty"`
 	ClientBinariesDir   *string                           `json:"client_binaries_dir,omitempty"`
 	CommitQueue         *APICommitQueueConfig             `json:"commit_queue,omitempty"`
@@ -646,29 +646,29 @@ func (a *APIAuthConfig) ToService() (interface{}, error) {
 	}, nil
 }
 
-type APIBucketConfig struct {
-	LogBucket APIBucket `json:"log_bucket"`
+type APIBucketsConfig struct {
+	LogBucket APIBucketConfig `json:"log_bucket"`
 }
 
-type APIBucket struct {
+type APIBucketConfig struct {
 	Name *string `json:"name"`
 	Type *string `json:"type"`
 }
 
-func (a *APIBucketConfig) BuildFromService(h interface{}) error {
+func (a *APIBucketsConfig) BuildFromService(h interface{}) error {
 	switch v := h.(type) {
-	case evergreen.BucketConfig:
+	case evergreen.BucketsConfig:
 		a.LogBucket.Name = utility.ToStringPtr(v.LogBucket.Name)
 		a.LogBucket.Type = utility.ToStringPtr(v.LogBucket.Type)
 	default:
-		return errors.Errorf("programmatic error: expected bucket config but got type %T", h)
+		return errors.Errorf("programmatic error: expected buckets config but got type %T", h)
 	}
 	return nil
 }
 
-func (a *APIBucketConfig) ToService() (interface{}, error) {
-	return evergreen.BucketConfig{
-		LogBucket: evergreen.Bucket{
+func (a *APIBucketsConfig) ToService() (interface{}, error) {
+	return evergreen.BucketsConfig{
+		LogBucket: evergreen.BucketConfig{
 			Name: utility.FromStringPtr(a.LogBucket.Name),
 			Type: utility.FromStringPtr(a.LogBucket.Type),
 		},
