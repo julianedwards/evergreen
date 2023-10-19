@@ -1,7 +1,6 @@
 package apimodels
 
 import (
-	"strings"
 	"time"
 
 	"github.com/evergreen-ci/evergreen/model/log"
@@ -35,16 +34,6 @@ type LogMessage struct {
 	Message   string         `bson:"m" json:"m"`
 	Timestamp time.Time      `bson:"ts" json:"ts"`
 	Version   int            `bson:"v" json:"v"`
-}
-
-// TaskLog is a group of LogMessages, and mirrors the model.TaskLog
-// type, sans the ObjectID field.
-type TaskLog struct {
-	TaskId       string       `json:"t_id"`
-	Execution    int          `json:"e"`
-	Timestamp    time.Time    `json:"ts"`
-	MessageCount int          `json:"c"`
-	Messages     []LogMessage `json:"m"`
 }
 
 func GetSeverityMapping(s level.Priority) string {
@@ -104,21 +93,6 @@ func StreamFromLogIterator(it log.LogIterator) chan LogMessage {
 			}))
 		}
 	}()
-
-	return lines
-}
-
-func ConvertMessagesToLines(msgs []LogMessage) []log.LogLine {
-	var lines []log.LogLine
-	for _, msg := range msgs {
-		for _, line := range strings.Split(msg.Message, "\n") {
-			lines = append(lines, log.LogLine{
-				// TODO: add priortiy
-				Timestamp: msg.Timestamp.UTC().UnixNano(),
-				Data:      line,
-			})
-		}
-	}
 
 	return lines
 }
