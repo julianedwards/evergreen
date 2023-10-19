@@ -93,3 +93,4 @@ buckets:
   log_bucket:
     name: "logs"
     type: "gridfs"
+    db_name: "task_output_smoke"
