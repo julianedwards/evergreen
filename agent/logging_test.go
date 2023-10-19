@@ -53,10 +53,11 @@ func TestAgentFileLogging(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// run a task with a command logger specified as a file
+	// Run a task with a command logger specified as a file.
 	taskID := "logging"
 	taskSecret := "mock_task_secret"
 	task := &task.Task{
+		Project:     "project",
 		Id:          "t1",
 		Execution:   0,
 		DisplayName: "task1",
@@ -87,6 +88,11 @@ func TestAgentFileLogging(t *testing.T) {
 						},
 					}},
 				},
+				Loggers: &model.LoggerConfig{
+					Agent:  []model.LogOpts{{Type: model.FileLogSender}},
+					System: []model.LogOpts{{Type: model.SplunkLogSender}},
+					Task:   []model.LogOpts{{Type: model.FileLogSender}},
+				},
 				BuildVariants: model.BuildVariants{
 					{Name: "bv", Tasks: []model.BuildVariantTaskUnit{{Name: "task1", Variant: "bv"}}},
 				},
@@ -101,7 +107,7 @@ func TestAgentFileLogging(t *testing.T) {
 	err = agt.runTaskCommands(ctx, tc)
 	require.NoError(err)
 
-	// verify log contents
+	// Verify log contents.
 	f, err := os.Open(fmt.Sprintf("%s/%s/%s/task.log", tmpDirName, taskLogDirectory, "shell.exec"))
 	require.NoError(err)
 	bytes, err := io.ReadAll(f)
