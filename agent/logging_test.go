@@ -11,7 +11,6 @@ import (
 	"github.com/evergreen-ci/evergreen/agent/internal/client"
 	"github.com/evergreen-ci/evergreen/model"
 	"github.com/evergreen-ci/evergreen/model/task"
-	"github.com/evergreen-ci/evergreen/taskoutput"
 	_ "github.com/evergreen-ci/evergreen/testutil"
 	"github.com/evergreen-ci/evergreen/util"
 	"github.com/mongodb/jasper"
@@ -151,7 +150,7 @@ func TestStartLogging(t *testing.T) {
 	assert.NoError(agt.startLogging(ctx, tc))
 	tc.logger.Execution().Info("foo")
 	assert.NoError(tc.logger.Close())
-	lines := agt.comm.(*client.Mock).GetTaskLogs(tc.task.ID, taskoutput.TaskLogTypeAll)
+	lines := agt.comm.(*client.Mock).GetTaskLogs(tc.task.ID)
 	assert.Equal("foo", lines[0].Data)
 
 	// check that expansions are correctly populated

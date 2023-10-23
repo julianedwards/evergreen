@@ -22,7 +22,6 @@ import (
 	"github.com/evergreen-ci/evergreen/model/task"
 	"github.com/evergreen-ci/evergreen/model/testresult"
 	"github.com/evergreen-ci/evergreen/rest/model"
-	"github.com/evergreen-ci/evergreen/taskoutput"
 	"github.com/evergreen-ci/evergreen/util"
 	"github.com/evergreen-ci/utility"
 	"github.com/mongodb/grip"
@@ -76,7 +75,7 @@ type Mock struct {
 	TestLogs         []*serviceModel.TestLog
 	TestLogCount     int
 
-	taskLogs   map[string]map[taskoutput.TaskLogType][]log.LogLine
+	taskLogs   map[string][]log.LogLine
 	PatchFiles map[string]string
 	keyVal     map[string]*serviceModel.KeyVal
 
@@ -98,7 +97,7 @@ func NewMock(serverURL string) *Mock {
 		maxAttempts:   defaultMaxAttempts,
 		timeoutStart:  defaultTimeoutStart,
 		timeoutMax:    defaultTimeoutMax,
-		taskLogs:      make(map[string]map[taskoutput.TaskLogType][]log.LogLine),
+		taskLogs:      make(map[string][]log.LogLine),
 		PatchFiles:    make(map[string]string),
 		keyVal:        make(map[string]*serviceModel.KeyVal),
 		AttachedFiles: make(map[string][]*artifact.File),
@@ -335,14 +334,14 @@ func (c *Mock) GetLoggerProducer(ctx context.Context, td TaskData, config *Logge
 	}
 
 	appendLine := func(line log.LogLine) error {
-		return c.sendTaskLogLine(td, taskoutput.TaskLogTypeAgent, line)
+		return c.sendTaskLogLine(td, line)
 	}
 
 	return NewSingleChannelLogHarness(td.ID, newMockSender("mock", appendLine)), nil
 }
 
 // sendTaskLine appends a task log line to the cache.
-func (c *Mock) sendTaskLogLine(td TaskData, logType taskoutput.TaskLogType, line log.LogLine) error {
+func (c *Mock) sendTaskLogLine(td TaskData, line log.LogLine) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -350,22 +349,16 @@ func (c *Mock) sendTaskLogLine(td TaskData, logType taskoutput.TaskLogType, line
 		return errors.New("logging failed")
 	}
 
-	if _, ok := c.taskLogs[td.ID]; !ok {
-		c.taskLogs[td.ID] = map[taskoutput.TaskLogType][]log.LogLine{}
-	}
-	c.taskLogs[td.ID][logType] = append(c.taskLogs[td.ID][logType], line)
-	c.taskLogs[td.ID][taskoutput.TaskLogTypeAll] = append(c.taskLogs[td.ID][taskoutput.TaskLogTypeAll], line)
+	c.taskLogs[td.ID] = append(c.taskLogs[td.ID], line)
 
 	return nil
 }
 
-func (c *Mock) GetTaskLogs(taskID string, logType taskoutput.TaskLogType) []log.LogLine {
-	taskLogs, ok := c.taskLogs[taskID]
-	if !ok {
-		return nil
-	}
+func (c *Mock) GetTaskLogs(taskID string) []log.LogLine {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	return taskLogs[logType]
+	return c.taskLogs[taskID]
 }
 
 func (c *Mock) GetPatchFile(ctx context.Context, td TaskData, patchFileID string) (string, error) {

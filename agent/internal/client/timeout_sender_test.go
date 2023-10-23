@@ -13,7 +13,6 @@ import (
 	"github.com/evergreen-ci/evergreen/apimodels"
 	"github.com/evergreen-ci/evergreen/model"
 	"github.com/evergreen-ci/evergreen/model/log"
-	"github.com/evergreen-ci/evergreen/taskoutput"
 	"github.com/mongodb/grip/level"
 	"github.com/mongodb/grip/logging"
 	"github.com/mongodb/grip/message"
@@ -27,7 +26,7 @@ func TestTimeoutSender(t *testing.T) {
 	comm := NewMock("url")
 	td := TaskData{ID: "task", Secret: "secret"}
 	ms := newMockSender("test_timeout_sender", func(line log.LogLine) error {
-		return comm.sendTaskLogLine(td, taskoutput.TaskLogTypeAgent, line)
+		return comm.sendTaskLogLine(td, line)
 	})
 	sender := makeTimeoutLogSender(ms, comm)
 

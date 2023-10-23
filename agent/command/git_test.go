@@ -23,7 +23,6 @@ import (
 	"github.com/evergreen-ci/evergreen/model/patch"
 	"github.com/evergreen-ci/evergreen/model/task"
 	modelutil "github.com/evergreen-ci/evergreen/model/testutil"
-	"github.com/evergreen-ci/evergreen/taskoutput"
 	"github.com/evergreen-ci/evergreen/testutil"
 	"github.com/evergreen-ci/evergreen/thirdparty"
 	"github.com/evergreen-ci/evergreen/util"
@@ -349,7 +348,7 @@ func (s *GitGetProjectSuite) TestTokenScrubbedFromLogger() {
 	s.NoError(logger.Close())
 	foundCloneCommand := false
 	foundCloneErr := false
-	for _, line := range s.comm.GetTaskLogs(conf.Task.Id, taskoutput.TaskLogTypeAll) {
+	for _, line := range s.comm.GetTaskLogs(conf.Task.Id) {
 		if strings.Contains(line.Data, "https://[redacted oauth token]:x-oauth-basic@github.com/evergreen-ci/doesntexist.git") {
 			foundCloneCommand = true
 		}
@@ -393,7 +392,7 @@ func (s *GitGetProjectSuite) TestStdErrLogged() {
 	foundCloneCommand := false
 	foundCloneErr := false
 	foundSSHErr := false
-	for _, line := range s.comm.GetTaskLogs(conf.Task.Id, taskoutput.TaskLogTypeAll) {
+	for _, line := range s.comm.GetTaskLogs(conf.Task.Id) {
 		if strings.Contains(line.Data, "git clone 'git@github.com:evergreen-ci/doesntexist.git' 'src' --branch 'main'") {
 			foundCloneCommand = true
 		}
@@ -826,7 +825,7 @@ func (s *GitGetProjectSuite) TestCorrectModuleRevisionSetModule() {
 	s.NoError(logger.Close())
 	toCheck := `Using revision/ref 'b27779f856b211ffaf97cbc124b7082a20ea8bc0' for module 'sample' (reason: specified in set-module).`
 	foundMsg := false
-	for _, line := range s.comm.GetTaskLogs(conf.Task.Id, taskoutput.TaskLogTypeAll) {
+	for _, line := range s.comm.GetTaskLogs(conf.Task.Id) {
 		if line.Data == toCheck {
 			foundMsg = true
 		}
@@ -866,7 +865,7 @@ func (s *GitGetProjectSuite) TestCorrectModuleRevisionManifest() {
 	s.NoError(logger.Close())
 	toCheck := `Using revision/ref '3585388b1591dfca47ac26a5b9a564ec8f138a5e' for module 'sample' (reason: from manifest).`
 	foundMsg := false
-	for _, line := range s.comm.GetTaskLogs(conf.Task.Id, taskoutput.TaskLogTypeAll) {
+	for _, line := range s.comm.GetTaskLogs(conf.Task.Id) {
 		if line.Data == toCheck {
 			foundMsg = true
 		}
